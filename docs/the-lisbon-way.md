@@ -22,11 +22,13 @@ Due curve veloci fanno un'inversione a U. Il tram non torna mai indietro su se s
 - **Non sbattere**: contro case, fiume, bordo della città, cantieri (dal 45° secondo) e le tue carrozze. Uno scontro
   costa 20 per passeggero a bordo, scendono tutti e il tram riparte dal deposito dopo un secondo.
 - Chi aspetta troppo se ne va (nessuna penalità, ma niente corsa).
-- 3 s di countdown, poi **90 s fissi** sempre più difficili: il tram passa da una casella ogni 0,3 s a una ogni 0,2 s,
-  più persone aspettano insieme (3 → 7) e aspettano meno (22 s → 12 s).
+- 3 s di countdown, poi **90 s fissi** sempre più veloci man mano che si avvicina la fine: una casella ogni 0,3 s fino al
+  45° secondo, poi 0,25 s, 0,2 s dal 64° e 0,15 s negli ultimi 12 s (il doppio della velocità iniziale). Più persone
+  aspettano insieme (3 → 7) e aspettano meno (22 s → 12 s).
+- **FINAL RUSH**: negli ultimi 15 s ogni corsa vale doppio.
 - Un turno senza scontri e con almeno 5 passeggeri portati vale **+1000**.
 - Competitivo: un test gioca 9 turni con tre bot. Punteggi mediani: tram che gira a caso 0, guidatore avido circa 5.200,
-  guidatore che raccoglie un colore prima di farlo scendere circa 7.400.
+  guidatore che raccoglie un colore prima di farlo scendere circa 11.100.
 - La card finale dà un titolo, le persone del muro che hai portato e le loro fermate; POST ON X le tagga. Il record di
   questo dispositivo resta in locale (solo grafica).
 

@@ -5,7 +5,8 @@
 // get off. Driving onto someone picks them up: they hook on as a new carriage at the back (the tram grows). Driving onto a
 // stop drops EVERY rider of that stop's colour at once: k riders together pay k times their fares (3 together = ×3 each).
 // Hitting a house, the river, roadworks or the tram's own carriages is a crash: the riders get off (a penalty), the tram
-// starts again from the depot after a second. 90 s, faster and busier all along; a shift without a crash pays a bonus.
+// starts again from the depot after a second. 90 s, faster and faster towards the end (the last 15 s pay double); a
+// shift without a crash pays a bonus.
 //
 // Integer arithmetic only, a seeded generator (src/common/det.ts), a state that round-trips through JSON exactly, no
 // clock, no network. Person number n and roadworks number n of a run are pure functions of (seed, n, tick).
@@ -17,8 +18,11 @@ export const RULES = {
   countdownTicks: 60,                          // 3 s between the start and the shift
   playTicks: 1800,                             // 90 s
   waveTicks: 300,                              // six waves of 15 s
-  /** The tram moves one cell every `step` ticks: from stepStart at the opening to stepEnd at the end. */
-  stepStart: 6, stepEnd: 4,
+  /** The tram moves one cell every `step` ticks: stepStart for the first half, then faster and faster towards the end
+   *  (a quadratic ramp): 6 ticks (0.3 s) until 0:45, 5 from 0:45, 4 from 1:04, 3 (0.15 s) for the last 12 s. */
+  stepStart: 6, stepEnd: 3,
+  /** The FINAL RUSH: in the last `rushTicks` of the shift every fare is multiplied by `rushMult`. */
+  rushTicks: 300, rushMult: 2,
   turnsMax: 2,                                 // turns queued ahead (two quick swipes make a U)
   maxCars: 16,                                 // carriages at most (a full tram leaves people waiting)
   peopleBound: 8,                              // hard bound of the state
@@ -186,7 +190,13 @@ export function createEngine(panels: readonly NamedPanel[]) {
     const t = tick - openTickOf(state);
     return t <= 0 ? 0 : Math.min(WAVES - 1, Math.floor(t / RULES.waveTicks));
   }
-  const stepAt = (state: LwState, tick: number): number => ramp(state, tick, RULES.stepStart, RULES.stepEnd);
+  /** The tram's step: quadratic in the time played, so it speeds up more and more as the end gets near. */
+  const stepAt = (state: LwState, tick: number): number => {
+    const e = elapsed(state, tick), span = RULES.stepStart - RULES.stepEnd;
+    return Math.max(RULES.stepEnd, RULES.stepStart - Math.floor((span + 1) * e * e / (RULES.playTicks * RULES.playTicks)));
+  };
+  /** The final rush: the last seconds of the shift pay double. */
+  const rushAt = (state: LwState, tick: number): boolean => elapsed(state, tick) > RULES.playTicks - RULES.rushTicks;
   const coneAt = (play: Play, cell: number): boolean => play.cones.some((c) => c.cell === cell);
 
   function event(state: LwState, what: What, panel: number, cell: number, stop: number, k: number, gain: number): void {
@@ -269,7 +279,7 @@ export function createEngine(panels: readonly NamedPanel[]) {
     if (stop < 0) return;
     const off = play.cars.filter((c) => c.stop === stop);
     if (!off.length) return;
-    const k = off.length, gain = off.reduce((sum, c) => sum + (c.gold ? RULES.goldFare : RULES.fare), 0) * k;
+    const k = off.length, gain = off.reduce((sum, c) => sum + (c.gold ? RULES.goldFare : RULES.fare), 0) * k * (rushAt(state, state.tick) ? RULES.rushMult : 1);
     play.cars = play.cars.filter((c) => c.stop !== stop);
     play.tram.splice(play.tram.length - k, k);                // the tram gets k carriages shorter
     play.score += gain; play.delivered += k;
@@ -362,7 +372,7 @@ export function createEngine(panels: readonly NamedPanel[]) {
 
   return {
     createRun, advance, applyInput, view, isFinished, score,
-    advanceInPlace, applyInputInPlace, clone, endTickOf, openTickOf, waveAt, stepAt, ramp, pool,
+    advanceInPlace, applyInputInPlace, clone, endTickOf, openTickOf, waveAt, stepAt, rushAt, ramp, pool,
   };
 }
 export type LisbonWayEngine = ReturnType<typeof createEngine>;

@@ -24,11 +24,13 @@ Two quick turns make a U-turn. The tram never goes straight back on itself.
 - **Do not crash**: the houses, the river, the edge of the town, roadworks (from 0:45) and your own carriages. A crash
   costs 20 per rider aboard, they all get off, and the tram starts again from the depot after a second.
 - People who wait too long walk away (no penalty, but no fare).
-- 3 s countdown, then a **fixed 90 s shift** that gets harder all along: the tram goes from a cell every 0.3 s to one
-  every 0.2 s, more people wait at once (3 → 7) and they wait less (22 s → 12 s).
+- 3 s countdown, then a **fixed 90 s shift** that gets faster and faster as the end gets near: a cell every 0.3 s until
+  0:45, then 0.25 s, 0.2 s from 1:04 and 0.15 s for the last 12 s (twice the opening speed). More people wait at once
+  (3 → 7) and they wait less (22 s → 12 s).
+- **FINAL RUSH**: in the last 15 s every fare is doubled.
 - A shift with no crash and 5 riders or more pays **+1000**.
 - Competitive by design: a test plays 9 shifts with three bots. Median scores: a tram wandering at random 0, a greedy
-  driver about 5 200, a driver who collects one colour before dropping about 7 400.
+  driver about 7 900, a driver who collects one colour before dropping about 11 100.
 - The end card gives you a driver title (CHAIN LEGEND, SMOOTH OPERATOR, TRAM 28 HERO, DEMOLITION TRAM…), the people of the
   wall you drove and their stops; POST ON X tags them. This device's best score is kept locally (display only).
 

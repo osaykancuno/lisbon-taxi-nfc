@@ -140,9 +140,27 @@ test('people walk away when kept waiting too long; a full tram leaves them in th
   assert.deepEqual(whats(passed), []); assert.equal(passed.play.people.length, 1); assert.equal(passed.play.cars.length, RULES.maxCars);
 });
 
-test('the shift gets harder all along: a faster tram, more people, golden passengers from 0:30, roadworks from 0:45', () => {
+test('faster and faster towards the end: 0.3 s a cell until 0:45, then 0.25, 0.2 and 0.15 s for the last 12 s', () => {
   const s = started(1), open = engine.openTickOf(s);
-  assert.equal(engine.stepAt(s, open), RULES.stepStart); assert.equal(engine.stepAt(s, open + RULES.playTicks), RULES.stepEnd);
+  assert.equal(engine.stepAt(s, open), 6); assert.equal(engine.stepAt(s, open + 899), 6);
+  assert.equal(engine.stepAt(s, open + 900), 5); assert.equal(engine.stepAt(s, open + 1272), 5);
+  assert.equal(engine.stepAt(s, open + 1273), 4); assert.equal(engine.stepAt(s, open + 1558), 4);
+  assert.equal(engine.stepAt(s, open + 1559), 3); assert.equal(engine.stepAt(s, open + RULES.playTicks), RULES.stepEnd);
+  // so the last 12 s run at twice the opening speed
+  assert.equal(RULES.stepStart / RULES.stepEnd, 2);
+});
+
+test('the FINAL RUSH: in the last 15 s every fare is doubled', () => {
+  const GRACA = 2, rushTick = OPEN + RULES.playTicks - RULES.rushTicks + 10;
+  const s = engine.advance(started(1), rushTick - 1);
+  assert.equal(engine.rushAt(s, rushTick - 20 - RULES.rushTicks), false); assert.equal(engine.rushAt(s, rushTick), true);
+  const atRush = { ...s, play: { ...s.play, dir: UP, tram: [c(9, 2), c(9, 3)], cars: [{ panel: 300, stop: GRACA, gold: false }], people: [], cones: [], nextStep: rushTick, nextSpawn: 1_000_000, nextCone: 1_000_000, stunUntil: 0, score: 0 } };
+  const dropped = engine.advance(atRush, rushTick);
+  assert.equal(dropped.play.events.at(-1)?.what, 'drop'); assert.equal(dropped.play.score, RULES.fare * RULES.rushMult);
+});
+
+test('the shift gets busier all along: more people, golden passengers from 0:30, roadworks from 0:45', () => {
+  const s = started(1), open = engine.openTickOf(s);
   for (let t = open + 1; t <= open + RULES.playTicks; t++) assert.ok(engine.stepAt(s, t - 1) - engine.stepAt(s, t) <= 1);
   let firstGold = Infinity, firstCone = Infinity, earlyCrowd = 0, lateCrowd = 0;
   for (let seed = 1; seed <= 12; seed++) {

@@ -47,7 +47,9 @@ const SAYS: Record<What, readonly string[]> = {
   crash: ['OUCH!', 'MY COFFEE!', 'NGMI', 'I WALK FROM HERE'],
   gone: ['TOO SLOW!', "I'LL TAKE A TUK-TUK", 'FORGET IT'],
 };
-const WAVE_BANNERS = ['ALL ABOARD!', 'FASTER!', '★ GOLDEN PASSENGERS', 'ROADWORKS!', 'RUSH HOUR!', 'LAST STOPS!'];
+/** What each 15 s wave brings (empty: nothing new). The speed-ups and the final rush have their own banners. */
+const WAVE_BANNERS = ['ALL ABOARD!', '', '★ GOLDEN PASSENGERS', 'ROADWORKS!', '', ''];
+const SPEED_BANNERS = ['', 'FASTER!', 'EVEN FASTER!', 'TOP SPEED!'];
 
 type Mode = 'idle' | 'play' | 'end';
 type Pop = { seq: number; what: What; cell: number; stop: number; k: number; gain: number; panel: number; t0: number };
@@ -120,17 +122,18 @@ const bell = (): void => beep([1320, 1660], 0.09, 'sine', 0.05);
 class Music {
   private timer: number | undefined;
   private step = 0;
-  private fast = false;
+  private level = 0;
   private readonly bass = [110, 110, 130.8, 98, 110, 110, 146.8, 130.8];
   private readonly lead = [440, 523.3, 659.3, 587.3, 523.3, 440, 392, 440, 523.3, 659.3, 784, 659.3, 587.3, 523.3, 493.9, 440];
   start(): void { if (this.timer === undefined) this.loop(); }
-  stop(): void { window.clearTimeout(this.timer); this.timer = undefined; this.step = 0; this.fast = false; }
-  rush(on: boolean): void { this.fast = on; }
+  stop(): void { window.clearTimeout(this.timer); this.timer = undefined; this.step = 0; this.level = 0; }
+  /** 0 at the start, 3 at top speed: the tune speeds up with the tram. */
+  speed(level: number): void { this.level = level; }
   private loop(): void {
-    const ms = this.fast ? 105 : 140;
+    const ms = [140, 124, 108, 92][this.level] ?? 92, fast = this.level >= 2;
     if (soundOn) {
       if (this.step % 2 === 0) beep([this.bass[(this.step / 2) % this.bass.length] as number], ms / 1000 * 1.6, 'triangle', 0.05);
-      if (this.step % 4 === 1 || (this.fast && this.step % 2 === 1)) beep([this.lead[(this.step >> 1) % this.lead.length] as number], 0.07, 'square', 0.012);
+      if (this.step % 4 === 1 || (fast && this.step % 2 === 1)) beep([this.lead[(this.step >> 1) % this.lead.length] as number], 0.07, 'square', 0.012);
     }
     this.step++;
     this.timer = window.setTimeout(() => this.loop(), ms);
@@ -168,7 +171,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
   let pops: Pop[] = [];
   let bits: Bit[] = [];
   let banner: { text: string; t0: number; gold: boolean } | null = null;
-  let lastWave = -2, lastCount = -1, lastSecond = -1, flash = 0, shake = 0;
+  let lastWave = -2, lastLevel = 0, rushShown = false, lastCount = -1, lastSecond = -1, flash = 0, shake = 0;
   let knownGold = new Set<number>();
   let endStats: EndStats | null = null;
   let best: { best: number; isNew: boolean } | null = null;
@@ -178,7 +181,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
 
   function reset(isPractice: boolean): void {
     view = null; shown = null; nowTick = 0; seen = new Map(); pops = []; bits = []; banner = null;
-    lastWave = -2; lastCount = -1; lastSecond = -1; flash = 0; shake = 0; knownGold = new Set();
+    lastWave = -2; lastLevel = 0; rushShown = false; lastCount = -1; lastSecond = -1; flash = 0; shake = 0; knownGold = new Set();
     finalScore = null; endStats = null; best = null; practice = isPractice;
     hits = new HitFeed('the-lisbon-way', isPractice ? false : undefined);
   }
@@ -409,7 +412,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
     for (const c of s?.play.cars ?? []) aboard[c.stop] = (aboard[c.stop] as number) + 1;
     const total = s?.play.cars.length ?? 0;
     text(total ? `ON BOARD · ${total}` : 'ON BOARD · NOBODY YET', 12, PANEL_Y + 14, `500 10px ${F_MONO}`, '#8C8A84', 'left');
-    if (s) text(`BEST CHAIN ×${s.play.bestChain}`, W - 12, PANEL_Y + 14, `500 10px ${F_MONO}`, '#8C8A84', 'right');
+    if (s) text(`${s.play.delivered} DROPPED · BEST CHAIN ×${s.play.bestChain}`, W - 12, PANEL_Y + 14, `500 10px ${F_MONO}`, '#8C8A84', 'right');
     const w = (W - 24 - 4 * 6) / STOP_COUNT, y = PANEL_Y + 28, h = H - y - 40, max = Math.max(...aboard);
     STOPS.forEach((stop, i) => {
       const x = 12 + i * (w + 6), n = aboard[i] as number, lead = n > 0 && n === max;
@@ -431,11 +434,36 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
     const done = Math.max(0, Math.min(1, (Math.max(nowTick, open) - open) / RULES.playTicks));
     ctx.fillStyle = '#3A3936'; ctx.fillRect(W / 2 - 50, 54, 100, 4); ctx.fillStyle = urgent ? TRAM : BLUE; ctx.fillRect(W / 2 - 50, 54, 100 * done, 4);
     text(fmtScore(s.play.score), 14, 72, `30px ${F_ANTON}`, CHALK, 'left');
-    text(`${s.play.delivered} DROPPED`, W - 14, 30, `500 11px ${F_MONO}`, '#B0ACA2', 'right');
+    // the speed: four bars, yellow then red as the end gets near
+    const level = RULES.stepStart - engine.stepAt(s, Math.max(nowTick, open)), rush = engine.rushAt(s, nowTick) && !s.gameOver;
+    text(rush ? 'FINAL RUSH ×2' : 'SPEED', W - 14 - 4 * 13 - 6, 30, `500 11px ${F_MONO}`, rush ? TRAM : '#B0ACA2', 'right');
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = i <= level ? (level >= 3 ? RED : level >= 2 ? '#F28C28' : TRAM) : '#3A3936';
+      ctx.fillRect(W - 14 - (4 - i) * 13 + 2, 36 - i * 4, 9, 6 + i * 4);
+    }
     text(s.play.crashes ? `${s.play.crashes} CRASH${s.play.crashes > 1 ? 'ES' : ''}` : 'NO CRASH', W - 14, 72, `500 11px ${F_MONO}`, s.play.crashes ? RED : TRAM, 'right');
     if (nowTick >= open && !s.gameOver) {
       const wave = engine.waveAt(s, nowTick);
-      if (wave !== lastWave) { banner = { text: WAVE_BANNERS[wave] as string, t0: performance.now(), gold: wave === WAVE_BANNERS.length - 1 }; lastWave = wave; }
+      if (wave !== lastWave) { if (WAVE_BANNERS[wave]) banner = { text: WAVE_BANNERS[wave] as string, t0: performance.now(), gold: false }; lastWave = wave; }
+      if (level > lastLevel) { banner = { text: SPEED_BANNERS[level] as string, t0: performance.now(), gold: level >= 2 }; lastLevel = level; beep([440, 660, 880], 0.06, 'sawtooth', 0.04); }
+      if (rush && !rushShown) { rushShown = true; banner = { text: 'FINAL RUSH: EVERY FARE ×2!', t0: performance.now(), gold: true }; beep([523, 659, 784, 1047], 0.08, 'square', 0.05); }
+    }
+  }
+  /** Speed lines at the edges of the town as the tram speeds up; a pulsing gold frame in the final rush. */
+  function rushFx(s: LwState, now: number): void {
+    if (s.gameOver || nowTick < engine.openTickOf(s)) return;
+    const level = RULES.stepStart - engine.stepAt(s, nowTick);
+    if (level >= 1) {
+      ctx.strokeStyle = 'rgba(11,11,11,.18)'; ctx.lineWidth = 2;
+      const n = 4 + level * 4, speed = 2 + level * 2;
+      for (let i = 0; i < n; i++) {
+        const y = GY + ((i * 97 + now * speed / 8) % (ROWS * CELL)), len = 10 + level * 8, side = i % 2 ? W - 6 : 6;
+        ctx.beginPath(); ctx.moveTo(side, y); ctx.lineTo(side, y + len); ctx.stroke();
+      }
+    }
+    if (engine.rushAt(s, nowTick)) {
+      ctx.strokeStyle = `rgba(242,194,48,${(0.55 + 0.35 * Math.sin(now / 90)).toFixed(3)})`; ctx.lineWidth = 6;
+      ctx.strokeRect(3, GY + 3, W - 6, ROWS * CELL - 6);
     }
   }
   /** One line of help in the first seconds, then whenever there is something to learn. */
@@ -502,6 +530,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
       text(v, 74, 327 + i * 42, fitFont(v, W - 90, 20, F_ANTON), INK, 'left');
     });
     text('Do not hit houses, roadworks or your own tram.', W / 2, 460, `500 12px ${F_MONO}`, RED);
+    text('Faster and faster · the last 15 s pay double!', W / 2, 484, `500 12px ${F_MONO}`, BLUE);
     const n = Math.ceil(left * TICK_MS / 1000);
     if (n !== lastCount) { lastCount = n; beep([440], 0.05, 'sine'); }
   }
@@ -509,7 +538,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
     const open = s ? engine.openTickOf(s) : 0;
     if (!s || mode !== 'play' || s.gameOver || nowTick < open) { music.stop(); return; }
     music.start();
-    music.rush(engine.waveAt(s, nowTick) >= 4);
+    music.speed(RULES.stepStart - engine.stepAt(s, nowTick));
     const secs = Math.ceil((engine.endTickOf(s) - nowTick) * TICK_MS / 1000);
     if (secs <= 10 && secs !== lastSecond) { lastSecond = secs; beep([secs <= 3 ? 1320 : 990], 0.04, 'square', 0.04); }
   }
@@ -535,6 +564,7 @@ function createStage(host: HTMLElement, io: StageIO): Stage {
       cones(s, now);
       people(s, now);
       tram(s, now);
+      rushFx(s, now);
       popups(now);
       hint(s);
       aboardPanel(s);
@@ -702,7 +732,7 @@ export const lisbonWayAdapter: GameAdapter = {
   title: 'THE LISBON WAY',
   heading: 'Drive the tram of the wall',
   tagline: 'Drive Lisbon\'s yellow tram: pick up the people of the wall, drop them at the stop of their colour. 90 seconds.',
-  lede: 'You drive Lisbon\'s yellow tram through a grid of streets seen from above, for 90 seconds. It never stops: steer it with the arrow keys (or W A S D), a swipe, or a tap on the side you want to turn to. Drive into someone to pick them up: they hook on as a new carriage, their face at the window and the colour of their stop along the side. Drive onto a stop and everyone of that colour gets off at once: riders dropped together pay more (2 together ×2 each, 3 together ×3 each…), so it pays to collect the same colour. ★ golden passengers pay triple. Do not hit the houses, the river, roadworks or your own tram: the riders get off and you start again from the depot. The tram gets faster and the town busier every second; a shift with no crash pays +1000. One credit per shift, scored by the server.',
+  lede: 'You drive Lisbon\'s yellow tram through a grid of streets seen from above, for 90 seconds. It never stops: steer it with the arrow keys (or W A S D), a swipe, or a tap on the side you want to turn to. Drive into someone to pick them up: they hook on as a new carriage, their face at the window and the colour of their stop along the side. Drive onto a stop and everyone of that colour gets off at once: riders dropped together pay more (2 together ×2 each, 3 together ×3 each…), so it pays to collect the same colour. ★ golden passengers pay triple. Do not hit the houses, the river, roadworks or your own tram: the riders get off and you start again from the depot. The tram gets faster and faster as the end gets near, and the last 15 seconds pay double (FINAL RUSH); a shift with no crash pays +1000. One credit per shift, scored by the server.',
   stateSchema: stateSchema as never,
   snapshotSchema: snapshotSchema as never,
   parseSavedRound: createSavedRoundParser(stateSchema as never, inputSchema as never),

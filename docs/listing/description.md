@@ -26,7 +26,8 @@ window and the colour of their stop along the side. Drive onto a stop and everyo
 riders dropped together pay more (two ×2 each, three ×3 each…), so the longer your tram, the bigger the score.
 
 But a long tram is hard to steer. Hit a house, the river, roadworks or your own carriages and everyone gets off.
-The tram gets faster every second; golden passengers pay triple; a shift with no crash pays +1000.
+The tram speeds up as the clock runs down, and the last 15 seconds are the FINAL RUSH: every fare pays double.
+Golden passengers pay triple; a shift with no crash pays +1000.
 
 Swipe or use the arrow keys. 1 credit per shift, scored by SuperRare's server. Practice is free.
 A Remix The Wall experiment · NFC Summit 2027 · Lisbon.
@@ -42,7 +43,8 @@ finestrino e il colore della loro fermata sul fianco. Passa sopra una fermata e 
 insieme: chi scende insieme vale di più (due ×2 ciascuno, tre ×3 ciascuno…), quindi più è lungo il tram, più punti fai.
 
 Ma un tram lungo è difficile da guidare. Se sbatti contro una casa, il fiume, un cantiere o le tue carrozze, scendono
-tutti. Il tram accelera ogni secondo; i passeggeri d'oro valgono il triplo; un turno senza scontri vale +1000.
+tutti. Il tram accelera man mano che il tempo finisce, e gli ultimi 15 secondi sono il FINAL RUSH: ogni corsa vale doppio.
+I passeggeri d'oro valgono il triplo; un turno senza scontri vale +1000.
 
 Swipe o frecce. 1 credito a partita, punteggio calcolato dal server di SuperRare. La pratica è gratuita.
 A Remix The Wall experiment · NFC Summit 2027 · Lisbon.
