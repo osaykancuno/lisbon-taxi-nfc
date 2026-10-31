@@ -37,11 +37,12 @@ icone per "Aggiungi alla schermata Home". Pratica gratuita con le stesse regole 
 
 ## Pubblicare da Windows
 
-Doppio clic su `PUBBLICA.cmd` (la prima volta e ogni volta che il gioco cambia). Fa tutto `PUBBLICA.ps1`: controlla
-Node.js, installa la riga di comando di SuperRare e le dipendenze, aggiorna i nomi del muro, lancia i test, fa il login
-se serve, crea l'app una volta sola (la risposta resta in `deploy/the-lisbon-way.app.json`, la config in
-`deploy/the-lisbon-way.config.json`), costruisce lo ZIP e aggiorna la stessa app; alla fine stampa i dati per il modulo
-di invio e apre il gioco e la pagina di invio.
+Doppio clic su `PUBBLICA.cmd` ogni volta che il gioco cambia. Fa tutto `PUBBLICA.ps1`: controlla Node.js, installa la
+riga di comando di SuperRare e le dipendenze, aggiorna i nomi del muro, lancia i test, fa il login se serve, costruisce
+lo ZIP e **aggiorna l'app già online all'indirizzo scritto in `deploy/the-lisbon-way.origin`**
+(https://pruney4c.srstudio.dev, quella inviata all'arcade). La prima volta in una cartella ritrova da solo l'App ID di
+quell'app tra i tuoi prodotti e scrive `deploy/the-lisbon-way.config.json`; se non ci riesce, te lo chiede. Non crea mai
+un'app nuova, a meno che tu non scriva NUOVA.
 
 ## Dove sta
 

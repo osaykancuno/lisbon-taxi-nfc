@@ -69,6 +69,31 @@ if (-not (Test-Path $Config) -and (Test-Path $Answer)) {
   Step 'Riprendo la prima pubblicazione: l''app esiste gia'''
   Run 'npx' @('--no-install', 'tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
 }
+# il gioco e' gia' online a questo indirizzo (deploy\the-lisbon-way.origin): si aggiorna QUELLA app, ritrovata tra le tue
+$OriginFile = Join-Path $PSScriptRoot 'deploy\the-lisbon-way.origin'
+if (-not (Test-Path $Config) -and (Test-Path $OriginFile)) {
+  $origin = (Get-Content -Raw -LiteralPath $OriginFile).Trim()
+  Step "Cerco tra le tue app quella gia' online: $origin"
+  $list = Invoke-Rare @('product', 'list')
+  if ($null -eq $list -or -not $list.ok) {
+    Write-Host 'Serve il login: approva nel browser il codice che compare qui sotto.' -ForegroundColor Yellow
+    Run 'rare-profile' @('login') 'Il login'
+    $list = Invoke-Rare @('product', 'list')
+  }
+  $found = 2
+  if ($list -and $list.ok) {
+    $listFile = Join-Path $env:TEMP 'the-lisbon-way-products.json'
+    [System.IO.File]::WriteAllText($listFile, $script:CliRaw)
+    & npx --no-install tsx scripts/the-lisbon-way-config.ts --origin $origin --products $listFile
+    $found = $LASTEXITCODE
+  }
+  if ($found -ne 0) {
+    Write-Host ''
+    Write-Host "Non trovo da solo l'App ID di $origin." -ForegroundColor Yellow
+    $id = Read-Host "Incollalo qui (lo trovi nella pagina dell'app su SuperRare Studio, o nella lista qui sopra)"
+    Run 'npx' @('--no-install', 'tsx', 'scripts/the-lisbon-way-config.ts', '--origin', $origin, '--app-id', $id.Trim()) 'La scrittura della configurazione'
+  }
+}
 if (-not (Test-Path $Config)) {
   # senza la config si creerebbe un'app NUOVA: mai per sbaglio, solo se lo chiedi esplicitamente
   Write-Host ''

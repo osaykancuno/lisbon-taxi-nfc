@@ -45,8 +45,10 @@ manifest with home-screen icons (Add to Home Screen, full screen).
 
 ## Publish (Windows)
 
-Double-click `PUBBLICA.cmd`. The first time it installs what is missing, logs in to SuperRare Studio, creates the app
-once (`deploy/the-lisbon-way.config.json`), then builds and publishes; every later run updates the same app. Details in
+Double-click `PUBBLICA.cmd`. It installs what is missing, logs in to SuperRare Studio, builds and **updates the app
+already online at the address in `deploy/the-lisbon-way.origin`** (https://pruney4c.srstudio.dev, the one submitted to
+the arcade): the first time in a folder it finds that app's id among your products and writes
+`deploy/the-lisbon-way.config.json`. It never creates a new app unless you type NUOVA. Details in
 [docs/the-lisbon-way.md](docs/the-lisbon-way.md) (Italian).
 
 Elsewhere (Node.js 22+, `npm install --global @rareprotocol/rare-profile@0.1.0`, `rare-profile login`):
