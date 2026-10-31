@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PaidRound } from '../src/shell/paid-round.js';
 import { lisbonWayAdapter } from '../src/games/the-lisbon-way/client.js';
-import { engine as lwEngine, NEIGHBOURS, RULES, type LwState } from '../src/games/the-lisbon-way/engine.js';
+import { engine as lwEngine, RULES, type LwState } from '../src/games/the-lisbon-way/engine.js';
 import { scoringConfiguration } from '../src/shell/config.js';
 
 const appId = '11111111-1111-4111-8111-111111111111';
@@ -132,20 +132,18 @@ test('prediction: a queued turn is applied where the player made it, then replac
   const open = lwEngine.advance(lwEngine.applyInput(lwEngine.createRun(8, lwConfig), { action: 'start' }, 0), RULES.countdownTicks + 2);
   const { round, sent, packet } = playingRound(lisbonWayAdapter, open);
   round.acceptSnapshot(parse(packet(open, open.tick)));
-  const next = (NEIGHBOURS[open.play.taxi.at] as number[])[0] as number;
   round.lastPacketAt = performance.now() - 200;                    // ~4 ticks after that snapshot
-  round.userInput({ action: 'route', path: [next] });
-  assert.deepEqual(round.predictedView.play.taxi.route, [next], 'the turn shows immediately');
+  round.userInput({ action: 'turn', dir: 3 });
+  assert.ok(round.predictedView.play.turns.includes(3) || round.predictedView.play.dir === 3, 'the turn shows immediately');
   assert.ok(round.predictedView.tick >= open.tick + 3, 'applied at the player\'s own tick, not before the snapshot');
-  assert.equal(sent.length, 1); assert.deepEqual(JSON.parse(sent[0] as string).input, { action: 'route', path: [next] });
+  assert.equal(sent.length, 1); assert.deepEqual(JSON.parse(sent[0] as string).input, { action: 'turn', dir: 3 });
   // the server accepted it as input #1 a few ticks later: its snapshot replaces the guess and clears the queue
-  const accepted = lwEngine.applyInput(open, { action: 'route', path: [next] }, open.tick + 6) as LwState;
+  const accepted = lwEngine.applyInput(open, { action: 'turn', dir: 3 }, open.tick + 6) as LwState;
   round.acceptSnapshot(parse(packet(accepted, accepted.tick + 1, { inputSeq: 1, inputTick: accepted.tick })));
   assert.equal(round.state.run.pendingInputs.length, 0);
-  assert.deepEqual(round.predictedView.play.taxi, accepted.play.taxi, 'the server\'s taxi, with the turn queued');
-  assert.deepEqual(accepted.play.taxi.route, [next]);
+  assert.deepEqual(round.predictedView.play.tram, accepted.play.tram, 'the server\'s tram');
   // refused once the round is finishing
-  round.state.phase = 'finalizing'; round.userInput({ action: 'boost' });
+  round.state.phase = 'finalizing'; round.userInput({ action: 'turn', dir: 1 });
   assert.equal(sent.length, 1, 'inputs are dropped once the round is finishing');
 });
 

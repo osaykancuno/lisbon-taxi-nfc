@@ -49,7 +49,7 @@ if (-not (Get-Command rare-profile -ErrorAction SilentlyContinue)) { Run 'npm' @
 Step 'Installo le dipendenze del gioco'
 # ogni pacchetto che serve, uno per uno: una cartella node_modules incompleta (o un npm che salta gli strumenti di
 # sviluppo, per esempio con NODE_ENV=production) si reinstalla da capo, strumenti di sviluppo compresi
-$needed = @('tsx', 'esbuild', 'fflate', 'typescript', 'three', 'zod', '@rareprotocol\connect')
+$needed = @('tsx', 'esbuild', 'fflate', 'typescript', 'zod', '@rareprotocol\connect')
 $missing = @($needed | Where-Object { -not (Test-Path (Join-Path $PSScriptRoot "node_modules\$_\package.json")) })
 if ($missing.Count -gt 0) {
   Write-Host "Mancano: $($missing -join ', '). Installo tutto da capo."
@@ -118,7 +118,7 @@ if ($null -eq $updated -or -not $updated.ok) {
   if ($null -eq $updated -or -not $updated.ok) { Fail "La pubblicazione non e' riuscita. Risposta: $script:CliRaw" }
 }
 
-$line = 'Taxi through the hills of Lisbon: pick up the people of the wall, drive them where they ask. 90 seconds.'
+$line = 'Drive the Lisbon tram: pick up the people of the wall, drop them at the stop of their colour. 90 seconds.'
 Write-Host ''
 Write-Host 'FATTO: THE LISBON WAY e'' online.' -ForegroundColor Green
 Write-Host ''

@@ -1,5 +1,4 @@
-// THE LISBON WAY: the rules (core.ts), the map (map.ts), the page's schemas (engine.ts) and the BUILT verifier, as Studio
-// receives it.
+// THE LISBON WAY: the map, the rules (core.ts), the page's schemas (engine.ts) and the BUILT verifier, as Studio receives it.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
@@ -7,8 +6,8 @@ import { packageGame } from '../scripts/package-game.js';
 import { scoringConfiguration, type Configuration } from '../src/shell/config.js';
 import { WALL_PANELS } from '../src/generated/wall.js';
 import {
-  DIST, E, EDGE, HOPS, KINDS, LENGTH, N, NEIGHBOURS, PLACES, RULES, STREETS, adjacent, checkState, createEngine, inputSchema,
-  parseInput, satisfaction, shiftBonus, shortestPath, speedOn, stateSchema, TIME, type Fare, type Kind, type LwState,
+  BLOCKED, CELLS, COLS, DEPOT, ROWS, RULES, SPAWNABLE, STOPS, STOP_COUNT, cellOf, checkState, createEngine, inputSchema, opposite,
+  parseInput, shiftBonus, stateSchema, stepFrom, stopAt, type Car, type LwState, type Person,
 } from '../src/games/the-lisbon-way/engine.js';
 import { mulberry32 } from '../src/common/det.js';
 import { Coordinator, loadBuiltVerifier } from './helpers/coordinator.js';
@@ -16,388 +15,278 @@ import { Coordinator, loadBuiltVerifier } from './helpers/coordinator.js';
 const CONFIG = scoringConfiguration('the-lisbon-way');
 const engine = createEngine(WALL_PANELS);
 const OPEN = RULES.countdownTicks;
+const UP = 0, RIGHT = 1, DOWN = 2, LEFT = 3;
 const started = (seed: number): LwState => engine.applyInput(engine.createRun(seed, CONFIG), { action: 'start' }, 0);
-/** A run at the start of the shift with exactly these passengers, no traffic and no more arrivals. */
-function scene(waiting: Partial<Fare>[], riders: Partial<Fare>[] = [], seed = 1): LwState {
+/** A run at the opening with exactly this tram, these riders and people, no new arrivals, the next step on the next tick. */
+function scene(tram: number[], cars: Partial<Car>[] = [], people: Partial<Person>[] = [], dir = UP, seed = 1): LwState {
   const s = engine.advance(started(seed), OPEN);
-  const fare = (f: Partial<Fare>, i: number): Fare => ({ id: i + 1, panel: i + 1, kind: 'ride', from: 0, to: 4, via: -1, until: 100_000, span: 1000, ...f });
-  return { ...s, play: { ...s.play, nextSpawn: 1_000_000, nextJam: 1_000_000, nextId: 100,
-    waiting: waiting.map(fare), riders: riders.map((f, i) => fare(f, i + 50)), jams: [] } };
+  return { ...s, play: { ...s.play, dir, tram, nextStep: OPEN + 1, nextSpawn: 1_000_000, nextCone: 1_000_000, nextId: 100,
+    cars: cars.map((c, i) => ({ panel: 300 + i, stop: 0, gold: false, ...c })),
+    people: people.map((p, i) => ({ id: i + 1, panel: 400 + i, cell: 0, stop: 0, gold: false, until: 1_000_000, ...p })) } };
 }
-const route = (s: LwState, path: number[], tick = s.tick): LwState => engine.applyInput(s, { action: 'route', path }, tick);
+const turn = (s: LwState, dir: number, tick = s.tick): LwState => engine.applyInput(s, { action: 'turn', dir }, tick);
 const whats = (s: LwState): string[] => s.play.events.map((e) => e.what);
-/** Ticks to drive along a street on a clear road. */
-const drive = (a: number, b: number): number => Math.ceil((LENGTH[(EDGE[a] as number[])[b] as number] as number) / speedOn(a, b));
-const BAIXA = 11, CHIADO = 8, ROSSIO = 3, CAIS = 10, MARQUES = 0;
+/** The tick of the n-th step (1-based) after a scene's first one. */
+const stepTick = (n: number): number => OPEN + 1 + (n - 1) * RULES.stepStart;
+const c = cellOf;
 
-test('the map: 14 places, 23 two-way streets, all connected, integer lengths, shortest paths that agree with DIST', () => {
-  assert.equal(N, PLACES.length); assert.equal(E, STREETS.length);
-  for (const [a, b] of STREETS) { assert.ok(adjacent(a, b) && adjacent(b, a)); assert.ok(a !== b); }
-  for (const len of LENGTH) assert.ok(Number.isSafeInteger(len) && len > 500);
-  for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) {
-    assert.ok((HOPS[a] as number[])[b] as number >= 0, 'connected');
-    const path = shortestPath(a, b);
-    let at = a, length = 0;
-    for (const p of path) { length += LENGTH[(EDGE[at] as number[])[p] as number] as number; at = p; }
-    assert.equal(at, b); assert.equal(length, (DIST[a] as number[])[b]);
-  }
-  assert.equal(RULES.start, BAIXA); assert.equal(PLACES[BAIXA]?.name, 'BAIXA');
+test('the map: a 15 × 19 grid, five stops on streets, a free depot, people never on a stop or the depot', () => {
+  assert.equal(CELLS, COLS * ROWS); assert.equal(STOP_COUNT, 5);
+  for (const stop of STOPS) { assert.equal(BLOCKED[stop.cell], false, stop.name); assert.equal(stopAt(stop.cell), STOPS.indexOf(stop)); }
+  assert.equal(new Set(STOPS.map((s) => s.cell)).size, STOP_COUNT);
+  assert.equal(BLOCKED[DEPOT], false); assert.equal(BLOCKED[DEPOT - COLS], false);
+  for (const cell of SPAWNABLE) { assert.equal(BLOCKED[cell], false); assert.equal(stopAt(cell), -1); assert.notEqual(cell, DEPOT); }
+  assert.ok(SPAWNABLE.length > 150);
+  for (let x = 0; x < COLS; x++) assert.equal(BLOCKED[c(x, ROWS - 1)], true, 'the river along the bottom');
+  assert.equal(stepFrom(c(0, 0), UP), -1); assert.equal(stepFrom(c(0, 0), LEFT), -1); assert.equal(stepFrom(c(3, 3), RIGHT), c(4, 3));
 });
 
 test('the scoring config: 3 s of countdown + a fixed 90 s shift, with room to start', () => {
   assert.deepEqual(CONFIG, { game: 'the-lisbon-way', maxTicks: 2160, roundTicks: 1860 });
   assert.equal(CONFIG.roundTicks, RULES.countdownTicks + RULES.playTicks);
-  assert.equal(RULES.playTicks / RULES.waveTicks, RULES.weights.length);
-  for (const w of RULES.weights) { assert.equal(w.reduce((a, b) => a + b, 0), 100); assert.equal(w.length, KINDS.length); }
 });
 
 test('createRun validates its seed and config; same seed and inputs, same shift', () => {
   assert.throws(() => engine.createRun(-1, CONFIG)); assert.throws(() => engine.createRun(2 ** 32, CONFIG)); assert.throws(() => engine.createRun('1', CONFIG));
   assert.throws(() => engine.createRun(1, { ...CONFIG, game: 'gate-rush' })); assert.throws(() => engine.createRun(1, { ...CONFIG, maxTicks: 5 }));
-  assert.throws(() => engine.createRun(1, { ...CONFIG, roundTicks: RULES.countdownTicks }));
-  const a = engine.advance(started(42), 600), b = engine.advance(started(42), 600), c = engine.advance(started(43), 600);
-  assert.deepEqual(a, b); assert.notDeepEqual(a.play.waiting, c.play.waiting);
-  assert.ok(a.play.waiting.length > 0 && a.play.jams.length > 0, 'fares and traffic arrive');
+  const drive = (seed: number): LwState => {
+    let s = started(seed);
+    for (const [t, d] of [[70, LEFT], [100, UP], [130, RIGHT], [190, UP]] as const) s = turn(engine.advance(s, t), d);
+    return engine.advance(s, 900);
+  };
+  const a = drive(42), b = drive(42), other = drive(43);
+  assert.deepEqual(a, b); assert.notDeepEqual(a.play.people, other.play.people);
+  assert.ok(a.play.people.length > 0, 'people appear');
   assert.deepEqual(JSON.parse(JSON.stringify(a)), a, 'the state round-trips through JSON');
   let stepped = started(42); for (let t = 1; t <= 600; t += 7) stepped = engine.advance(stepped, t);
-  assert.deepEqual(engine.advance(stepped, 600), a, 'many small advances = one big advance');
+  assert.deepEqual(engine.advance(stepped, 600), engine.advance(started(42), 600), 'many small advances = one big advance');
 });
 
-test('fares: none in the countdown; the first one street from the taxi; every kind in its wave; requests make sense', () => {
-  assert.equal(engine.advance(started(5), OPEN - 1).play.waiting.length, 0, 'the countdown is empty');
-  const first = engine.advance(started(5), OPEN + 1).play.waiting[0] as Fare;
-  assert.ok(adjacent(first.from, RULES.start), 'the first fare waits one street away'); assert.equal(first.kind, 'ride');
-  const firstWave = new Map<Kind, number>();
-  for (let seed = 1; seed <= 30; seed++) {
+test('the tram moves one cell per step in its heading; a turn takes effect at the next step; never straight back', () => {
+  let s = scene([c(7, 10)]);
+  s = engine.advance(s, stepTick(1));
+  assert.deepEqual(s.play.tram, [c(7, 9)]);
+  s = turn(s, RIGHT);
+  assert.deepEqual(s.play.turns, [RIGHT]);
+  s = engine.advance(s, stepTick(2));
+  assert.deepEqual(s.play.tram, [c(8, 9)]); assert.equal(s.play.dir, RIGHT);
+  // the same direction or straight back is ignored; two quick turns make a U
+  assert.deepEqual(turn(s, RIGHT).play.turns, []); assert.deepEqual(turn(s, LEFT).play.turns, []);
+  s = turn(turn(s, DOWN), LEFT);
+  assert.deepEqual(s.play.turns, [DOWN, LEFT]);
+  assert.deepEqual(turn(s, UP).play.turns, [DOWN, LEFT], 'two turns ahead at most');
+  s = engine.advance(s, stepTick(4));
+  assert.deepEqual(s.play.tram, [c(7, 10)], 'down, then left: a U');
+});
+
+test('pick up: driving onto someone hooks them on as a carriage with the colour of their stop', () => {
+  let s = scene([c(7, 10)], [], [{ cell: c(7, 9), stop: 3, panel: 77 }]);
+  s = engine.advance(s, stepTick(1));
+  assert.deepEqual(whats(s), ['board']);
+  assert.deepEqual(s.play.tram, [c(7, 9), c(7, 10)], 'the tram grows by one');
+  assert.deepEqual(s.play.cars, [{ panel: 77, stop: 3, gold: false }]); assert.equal(s.play.people.length, 0);
+  s = engine.advance(s, stepTick(2));
+  assert.deepEqual(s.play.tram, [c(7, 8), c(7, 9)], 'the carriage follows the head');
+});
+
+test('drop off: a stop drops EVERY rider of its colour at once, k together pay k times their fares', () => {
+  const GRACA = 2;
+  assert.equal(STOPS[GRACA]?.cell, c(9, 1));
+  let s = scene([c(9, 3), c(9, 4), c(9, 5), c(9, 6), c(9, 7)], [{ stop: GRACA }, { stop: 0 }, { stop: GRACA }, { stop: GRACA, gold: true }]);
+  s = engine.advance(s, stepTick(2));
+  assert.deepEqual(whats(s), ['drop']);
+  const drop = s.play.events[0];
+  assert.equal(drop?.k, 3); assert.equal(drop?.gain, (RULES.fare * 2 + RULES.goldFare) * 3);
+  assert.equal(s.play.score, (100 + 100 + 300) * 3); assert.equal(s.play.delivered, 3); assert.equal(s.play.bestChain, 3);
+  assert.deepEqual(s.play.cars, [{ panel: 301, stop: 0, gold: false }], 'the other colour stays aboard');
+  assert.equal(s.play.tram.length, 2, 'three carriages shorter'); assert.equal(s.play.tram[0], c(9, 1));
+  assert.equal(s.play.log.length, 3);
+  // a single rider pays one fare
+  const one = engine.advance(scene([c(9, 2), c(9, 3)], [{ stop: GRACA }]), stepTick(1));
+  assert.equal(one.play.score, RULES.fare);
+});
+
+test('crashes: the edge of the town, a house, the river, roadworks or the tram itself; riders lost, back at the depot', () => {
+  const crashes = (s: LwState): boolean => whats(s).includes('crash');
+  assert.ok(crashes(engine.advance(scene([c(0, 0)]), stepTick(1))), 'the edge');
+  assert.ok(crashes(engine.advance(scene([c(7, 14)]), stepTick(1))), 'a house');
+  assert.ok(crashes(engine.advance(scene([c(5, 17)], [], [], DOWN), stepTick(1))), 'the river');
+  const works = scene([c(7, 10)]);
+  assert.ok(crashes(engine.advance({ ...works, play: { ...works.play, cones: [{ cell: c(7, 9), until: 1_000_000 }] } }, stepTick(1))), 'roadworks');
+  // into its own carriages
+  let self = scene([c(5, 7), c(5, 8), c(6, 8), c(6, 7), c(6, 6)], [{}, {}, {}, {}]);
+  self = { ...self, play: { ...self.play, score: 500 } };
+  self = engine.advance(turn(self, RIGHT), stepTick(1));
+  assert.deepEqual(whats(self), ['crash']); assert.equal(self.play.events[0]?.k, 4);
+  assert.equal(self.play.score, 500 - 4 * RULES.crashPer); assert.equal(self.play.lost, 4); assert.equal(self.play.crashes, 1);
+  assert.deepEqual(self.play.tram, [DEPOT]); assert.deepEqual(self.play.cars, []); assert.equal(self.play.dir, UP);
+  // stunned for a second, then off again from the depot
+  const still = engine.advance(self, stepTick(1) + RULES.stunTicks - 1);
+  assert.deepEqual(still.play.tram, [DEPOT]);
+  const off = engine.advance(self, stepTick(1) + RULES.stunTicks + RULES.stepStart);
+  assert.deepEqual(off.play.tram, [DEPOT - COLS]);
+  // following its own tail is fine: the tail moves away
+  const loop = engine.advance(turn(scene([c(5, 7), c(5, 8), c(6, 8), c(6, 7)], [{}, {}, {}]), RIGHT), stepTick(1));
+  assert.deepEqual(whats(loop), []); assert.equal(loop.play.tram[0], c(6, 7));
+});
+
+test('people walk away when kept waiting too long; a full tram leaves them in the street', () => {
+  let s = scene([c(7, 10)], [], [{ cell: c(2, 3), until: OPEN + 3 }]);
+  s = engine.advance(s, OPEN + 3);
+  assert.deepEqual(whats(s), ['gone']); assert.equal(s.play.missed, 1); assert.equal(s.play.score, 0, 'no penalty');
+  const cells = [c(7, 10)]; for (let y = 11; y <= 16; y++) cells.push(c(7, y)); for (let x = 6; x >= 0; x--) cells.push(c(x, 16));
+  const full = scene(cells.slice(0, RULES.maxCars + 1), Array(RULES.maxCars).fill({}), [{ cell: c(7, 9) }]);
+  const passed = engine.advance(full, stepTick(1));
+  assert.deepEqual(whats(passed), []); assert.equal(passed.play.people.length, 1); assert.equal(passed.play.cars.length, RULES.maxCars);
+});
+
+test('the shift gets harder all along: a faster tram, more people, golden passengers from 0:30, roadworks from 0:45', () => {
+  const s = started(1), open = engine.openTickOf(s);
+  assert.equal(engine.stepAt(s, open), RULES.stepStart); assert.equal(engine.stepAt(s, open + RULES.playTicks), RULES.stepEnd);
+  for (let t = open + 1; t <= open + RULES.playTicks; t++) assert.ok(engine.stepAt(s, t - 1) - engine.stepAt(s, t) <= 1);
+  let firstGold = Infinity, firstCone = Infinity, earlyCrowd = 0, lateCrowd = 0;
+  for (let seed = 1; seed <= 12; seed++) {
     let run = started(seed);
-    for (let t = OPEN; t < CONFIG.roundTicks; t += 20) {
+    for (let t = open; t < open + RULES.playTicks; t += 10) {
       run = engine.advance(run, t);
-      for (const f of run.play.waiting) {
-        const w = engine.waveAt(run, t);
-        if (!firstWave.has(f.kind) || (firstWave.get(f.kind) as number) > w) firstWave.set(f.kind, w);
-        assert.ok(f.from !== f.to && ((HOPS[f.from] as number[])[f.to] as number) >= 2, 'a destination at least two streets away');
-        if (f.kind === 'tour') assert.ok(f.via >= 0 && f.via !== f.from && f.via !== f.to); else assert.equal(f.via, -1);
-      }
-      for (let p = 0; p < N; p++) assert.ok(run.play.waiting.filter((f) => f.from === p).length <= RULES.perPlace);
-      assert.equal(new Set(run.play.waiting.map((f) => f.panel)).size, run.play.waiting.length, 'one name waits once');
+      if (run.play.people.some((p) => p.gold)) firstGold = Math.min(firstGold, t - open);
+      if (run.play.cones.length) firstCone = Math.min(firstCone, t - open);
+      if (t - open < 300) earlyCrowd = Math.max(earlyCrowd, run.play.people.length); else if (t - open > 1500) lateCrowd = Math.max(lateCrowd, run.play.people.length);
+      for (const p of run.play.people) assert.ok(!run.play.tram.includes(p.cell) || run.play.cars.length >= RULES.maxCars);
     }
   }
-  assert.equal(firstWave.get('ride'), 0); assert.equal(firstWave.get('express'), 1); assert.equal(firstWave.get('gold'), 2); assert.equal(firstWave.get('tour'), 3);
-});
-
-test('difficulty ramps evenly from the first second to the last: more fares, less patience, less slack, more traffic', () => {
-  const s = started(1), open = engine.openTickOf(s), end = open + RULES.playTicks;
-  const at = (t: number, a: number, b: number): number => engine.ramp(s, t, a, b);
-  assert.equal(at(open, RULES.spawnStart, RULES.spawnEnd), RULES.spawnStart); assert.equal(at(end, RULES.spawnStart, RULES.spawnEnd), RULES.spawnEnd);
-  assert.equal(at(open - 30, RULES.patienceStart, RULES.patienceEnd), RULES.patienceStart); assert.equal(at(end + 99, RULES.patienceStart, RULES.patienceEnd), RULES.patienceEnd);
-  for (let t = open + 1; t <= end; t++) {
-    for (const [a, b] of [[RULES.spawnStart, RULES.spawnEnd], [RULES.patienceStart, RULES.patienceEnd], [RULES.slackStart, RULES.slackEnd], [RULES.jamEveryStart, RULES.jamEveryEnd]] as const) {
-      const step = at(t, a, b) - at(t - 1, a, b);
-      assert.ok(step === 0 || step === -1, 'never a jump');
-    }
-  }
-  // seen in a real (idle) run: fares wait less at the end, more people wait at once, more jams at once
-  let run = started(12), earlySpan = 0, lateSpan = 1e9, earlyCrowd = 0, lateCrowd = 0, lateJams = 0;
-  for (let t = open; t < end; t += 5) {
-    run = engine.advance(run, t);
-    for (const f of run.play.waiting) if (f.kind === 'ride') { if (t < open + 300) earlySpan = Math.max(earlySpan, f.span); else if (t > open + 1500) lateSpan = Math.min(lateSpan, f.span); }
-    if (t < open + 300) earlyCrowd = Math.max(earlyCrowd, run.play.waiting.length); else if (t > open + 1500) lateCrowd = Math.max(lateCrowd, run.play.waiting.length);
-    if (t > open + 1500) lateJams = Math.max(lateJams, run.play.jams.length);
-  }
-  assert.ok(earlySpan > lateSpan + 100, `patience ${earlySpan} -> ${lateSpan}`);
+  assert.ok(firstGold >= RULES.goldFromWave * RULES.waveTicks && firstGold < Infinity, `first gold ${firstGold}`);
+  assert.ok(firstCone >= RULES.conesFromWave * RULES.waveTicks && firstCone < Infinity, `first roadworks ${firstCone}`);
   assert.ok(lateCrowd > earlyCrowd, `crowd ${earlyCrowd} -> ${lateCrowd}`);
-  assert.ok(lateJams >= 3, `jams at the end ${lateJams}`);
 });
 
-test('the taxi drives the route street by street, picks up on the way and delivers at the destination', () => {
-  // a passenger at CHIADO for ROSSIO; the taxi at BAIXA drives BAIXA -> CHIADO -> ROSSIO
-  let s = scene([{ from: CHIADO, to: ROSSIO, until: 100_000 }]);
-  s = route(s, [CHIADO, ROSSIO]);
-  assert.deepEqual(s.play.taxi.route, [CHIADO, ROSSIO]);
-  const toChiado = drive(BAIXA, CHIADO), toRossio = drive(CHIADO, ROSSIO);
-  s = engine.advance(s, OPEN + toChiado);
-  assert.equal(s.play.taxi.at, CHIADO); assert.deepEqual(whats(s), ['board']);
-  assert.equal(s.play.riders.length, 1); assert.equal(s.play.waiting.length, 0);
-  const rider = s.play.riders[0] as Fare;
-  assert.equal(rider.span, engine.rideTicks(s, rider, CHIADO)); assert.equal(rider.until, s.tick + rider.span);
-  s = engine.advance(s, OPEN + toChiado + toRossio + 1);
-  assert.equal(s.play.taxi.at, ROSSIO); assert.deepEqual(whats(s), ['board', 'drop']);
-  assert.equal(s.play.delivered, 1); assert.equal(s.play.riders.length, 0); assert.equal(s.play.combo, 1);
-  const dropTick = (s.play.events.find((e) => e.what === 'drop') as { tick: number }).tick;
-  assert.ok(dropTick <= OPEN + toChiado + toRossio + 1, 'downhill from CHIADO to ROSSIO');
-  const tip = Math.floor(RULES.tipMax * (rider.until - dropTick) / rider.span);
-  assert.equal(s.play.score, RULES.base.ride + RULES.perHop * ((HOPS[CHIADO] as number[])[ROSSIO] as number) + tip);
-  assert.deepEqual(s.play.log, [{ panel: rider.panel, from: CHIADO, to: ROSSIO, gain: s.play.score }]);
-});
-
-test('a standing taxi picks up whoever appears at its place; three seats at most; the longest-waiting boards first', () => {
-  let s = scene([
-    { from: BAIXA, to: MARQUES, until: OPEN + 300 }, { from: BAIXA, to: 13, until: OPEN + 100 },
-    { from: BAIXA, to: 5, until: OPEN + 200 }, { from: BAIXA, to: 1, until: OPEN + 400 },
-  ], [{ from: ROSSIO, to: 13 }]);
-  s = engine.advance(s, OPEN + 1);
-  assert.equal(s.play.riders.length, RULES.seats);
-  assert.deepEqual(s.play.riders.slice(1).map((f) => f.to), [13, 5], 'the most urgent first');
-  assert.equal(s.play.waiting.length, 2);
-});
-
-test('a golden passenger: triple fare, less patience than a ride', () => {
-  let g = scene([], [{ kind: 'gold', from: BAIXA, to: CHIADO, until: OPEN + 500, span: 500 }]);
-  g = engine.advance(route(g, [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  assert.deepEqual(whats(g), ['drop']); assert.ok(g.play.score >= RULES.base.gold && RULES.base.gold === 3 * RULES.base.ride);
-  for (let seed = 1; seed <= 40; seed++) {
-    const run = engine.advance(started(seed), OPEN + 1500);
-    for (const f of run.play.waiting.filter((x) => x.kind === 'gold')) assert.ok(f.span < engine.ramp(run, run.tick, RULES.patienceStart, RULES.patienceEnd) + 10);
-  }
-});
-
-test('express: double fare, less time; tour: no drop-off before its stop, then a bigger fare', () => {
-  let x = scene([], [{ kind: 'express', from: BAIXA, to: CHIADO, until: OPEN + 500, span: 500 }]);
-  x = engine.advance(route(x, [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  assert.deepEqual(whats(x), ['drop']);
-  assert.ok(x.play.score >= RULES.base.express);
-  const ride = engine.rideTicks(x, { id: 1, panel: 1, kind: 'ride', from: BAIXA, to: MARQUES, via: -1, until: 0, span: 1 }, BAIXA);
-  const express = engine.rideTicks(x, { id: 1, panel: 1, kind: 'express', from: BAIXA, to: MARQUES, via: -1, until: 0, span: 1 }, BAIXA);
-  assert.ok(express < ride, `express ${express} < ride ${ride}`);
-  // a tour from BAIXA to ROSSIO via CHIADO: driving straight BAIXA -> ROSSIO does not drop them
-  let t = scene([], [{ kind: 'tour', from: BAIXA, to: ROSSIO, via: CHIADO, until: 100_000, span: 1000 }]);
-  t = engine.advance(route(t, [ROSSIO]), OPEN + drive(BAIXA, ROSSIO));
-  assert.equal(t.play.taxi.at, ROSSIO); assert.deepEqual(whats(t), []); assert.equal(t.play.riders.length, 1);
-  t = engine.advance(route(t, [CHIADO, ROSSIO]), OPEN + drive(BAIXA, ROSSIO) + drive(ROSSIO, CHIADO) * 2 + 2);
-  assert.deepEqual(whats(t), ['via', 'drop']);
-  assert.ok(t.play.score >= RULES.base.tour + RULES.perHop * (((HOPS[BAIXA] as number[])[ROSSIO] as number) + 1));
-});
-
-test('penalties: a waiting passenger gives up (-50), a rider out of time jumps out (-100); both reset the combo; the score never goes below 0', () => {
-  let s = scene([{ from: MARQUES, to: CAIS, until: OPEN + 10 }], [{ from: BAIXA, to: 13, until: OPEN + 20 }]);
-  s = { ...s, play: { ...s.play, score: 120, combo: 4, bestCombo: 4 } };
-  s = engine.advance(s, OPEN + 10);
-  assert.deepEqual(whats(s), ['gaveup']); assert.equal(s.play.score, 120 - RULES.gaveUp); assert.equal(s.play.combo, 0); assert.equal(s.play.gaveUp, 1);
-  s = engine.advance(s, OPEN + 20);
-  assert.deepEqual(whats(s), ['gaveup', 'jumped']); assert.equal(s.play.score, 0, 'clamped at 0'); assert.equal(s.play.jumped, 1);
-  assert.equal(s.play.riders.length, 0); assert.equal(s.play.bestCombo, 4);
-  // a delivery on the very tick of the deadline still counts
-  let late = scene([], [{ from: BAIXA, to: CHIADO, until: OPEN + drive(BAIXA, CHIADO) }]);
-  late = engine.advance(route(late, [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  assert.deepEqual(whats(late), ['drop']);
-});
-
-test('the combo multiplies fares: x2 from the 3rd delivery in a row, x4 at most', () => {
-  assert.deepEqual([0, 2, 3, 5, 6, 9, 30].map(engine.multOf), [1, 1, 2, 2, 3, 4, 4]);
-  let s = scene([], [{ from: BAIXA, to: CHIADO }]);
-  s = { ...s, play: { ...s.play, combo: 3, bestCombo: 3 } };
-  s = engine.advance(route(s, [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  const e = s.play.events.at(-1);
-  assert.equal(e?.what, 'drop'); assert.equal((e?.gain as number) % 2, 0); assert.ok((e?.gain as number) >= 2 * RULES.base.ride);
-});
-
-test('traffic: a jammed street is crawled at a quarter of the speed', () => {
-  let s = scene([]);
-  const edge = (EDGE[BAIXA] as number[])[CHIADO] as number;
-  s = { ...s, play: { ...s.play, jams: [{ edge, until: 100_000 }] } };
-  s = engine.advance(route(s, [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  assert.equal(s.play.taxi.to, CHIADO, 'still on the way');
-  assert.equal(speedOn(BAIXA, CHIADO, true), Math.floor(speedOn(BAIXA, CHIADO) / RULES.jamDivisor));
-  assert.equal(s.play.taxi.pos, speedOn(BAIXA, CHIADO, true) * drive(BAIXA, CHIADO));
-  s = engine.advance(s, OPEN + Math.ceil((LENGTH[edge] as number) / speedOn(BAIXA, CHIADO, true)));
-  assert.equal(s.play.taxi.at, CHIADO); assert.equal(s.play.taxi.to, -1);
-});
-
-test('hills: uphill streets are slow, downhill streets fast; the fastest way is not always the shortest', () => {
-  const GRACA = 4;
-  assert.ok(speedOn(ROSSIO, GRACA) < RULES.speed && speedOn(GRACA, ROSSIO) > RULES.speed, 'up to Graça is slow, down is fast');
-  assert.equal(speedOn(CAIS, BAIXA), RULES.speed, 'flat by the river');
-  assert.ok(((TIME[ROSSIO] as number[])[GRACA] as number) > ((TIME[GRACA] as number[])[ROSSIO] as number));
-  for (let a = 0; a < N; a++) for (const b of NEIGHBOURS[a] as number[]) assert.ok(speedOn(a, b, true) >= 1 && speedOn(a, b, false, true) > speedOn(a, b));
-  // the same street, driven up and down, in a real shift
-  const up = engine.advance(route(scene([]), [ROSSIO]), OPEN + drive(BAIXA, ROSSIO));
-  const climb = engine.advance(route(up, [GRACA]), OPEN + drive(BAIXA, ROSSIO) + drive(ROSSIO, GRACA) + 1);
-  assert.equal(climb.play.taxi.at, GRACA);
-  assert.ok(drive(ROSSIO, GRACA) > drive(GRACA, ROSSIO) * 2);
-});
-
-test('turbo: one charge at the start, ×1.7 for 2 s, one more per delivery (two at most); never two at once', () => {
-  let s = scene([], [{ from: BAIXA, to: CHIADO }, { from: BAIXA, to: CAIS }]);
-  assert.equal(s.play.boosts, RULES.boostStart);
-  s = engine.applyInput(route(s, [CHIADO]), { action: 'boost' }, OPEN);
-  assert.equal(s.play.boosts, 0); assert.equal(s.play.boostUntil, OPEN + RULES.boostTicks);
-  const again = engine.applyInput(s, { action: 'boost' }, OPEN + 1);
-  assert.equal(again.play.boostUntil, OPEN + RULES.boostTicks, 'no charge left, nothing changes');
-  const one = engine.advance(s, OPEN + 1);
-  assert.equal(one.play.taxi.pos, speedOn(BAIXA, CHIADO, false, true), 'boosted speed');
-  const there = engine.advance(s, OPEN + drive(BAIXA, CHIADO));
-  assert.deepEqual(whats(there), ['drop']); assert.equal(there.play.boosts, 1, 'a delivery charges one');
-  let full = { ...there, play: { ...there.play, boosts: RULES.boostMax } };
-  full = engine.advance(route(full, [CAIS]), there.tick + drive(CHIADO, CAIS) + 2);
-  assert.ok(whats(full).filter((w) => w === 'drop').length === 2); assert.equal(full.play.boosts, RULES.boostMax, 'capped');
-  // a running turbo cannot be stacked, and none before the shift opens
-  const twice = engine.applyInput({ ...s, play: { ...s.play, boosts: 2 } }, { action: 'boost' }, OPEN + 5);
-  assert.equal(twice.play.boosts, 2); assert.equal(twice.play.boostUntil, OPEN + RULES.boostTicks);
-  assert.equal(engine.applyInput(started(3), { action: 'boost' }, OPEN - 1).play.boosts, RULES.boostStart);
-});
-
-test('shared ride: riders dropped together at the same place pay ×1.5 each', () => {
-  const solo = engine.advance(route(scene([], [{ from: BAIXA, to: CHIADO }]), [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  const duo = engine.advance(route(scene([], [{ from: BAIXA, to: CHIADO }, { from: BAIXA, to: CHIADO, panel: 77 }]), [CHIADO]), OPEN + drive(BAIXA, CHIADO));
-  const soloGain = solo.play.events.at(-1)?.gain as number;
-  const duoGains = duo.play.events.filter((e) => e.what === 'drop').map((e) => e.gain);
-  assert.equal(duoGains.length, 2); assert.equal(duo.play.shared, 2); assert.equal(solo.play.shared, 0);
-  assert.equal(duoGains[0], Math.floor(soloGain * RULES.sharedNum / RULES.sharedDen));
-  assert.ok((duoGains[1] as number) >= (duoGains[0] as number), 'the combo grows inside the shared ride');
-});
-
-test('routes: replaced by the next one, from the place the taxi drives to; an undrivable route is a no-op', () => {
-  let s = scene([]);
-  s = route(s, [CHIADO, ROSSIO, MARQUES]);
-  s = engine.advance(s, OPEN + 2);
-  assert.equal(s.play.taxi.to, CHIADO); assert.deepEqual(s.play.taxi.route, [ROSSIO, MARQUES]);
-  const turned = route(s, [CAIS], OPEN + 3);
-  assert.deepEqual(turned.play.taxi.route, [CAIS], 'replaced, starting from CHIADO');
-  for (const bad of [[ROSSIO, CHIADO, MARQUES, 13], [BAIXA, BAIXA], [MARQUES], [CHIADO], [13]]) {
-    if (bad.length === 1 && adjacent(CHIADO, bad[0] as number)) continue;
-    assert.deepEqual(route(s, bad, OPEN + 3).play.taxi, engine.advance(s, OPEN + 3).play.taxi, JSON.stringify(bad));
-  }
-  assert.deepEqual(route(s, [], OPEN + 3).play.taxi.route, [], 'an empty route: stop at the next place');
-  assert.equal(parseInput({ action: 'route', path: Array(RULES.routeMax + 1).fill(0) }), null);
-});
-
-test('the end: a fixed 90 s shift; the bonus rewards a good shift; a finished run never changes', () => {
+test('the end: a fixed 90 s shift; no crash and 5 riders or more pays the bonus; a finished run never changes', () => {
   const idle = engine.advance(started(9), CONFIG.roundTicks);
   assert.equal(idle.gameOver, true); assert.equal(idle.play.end, 'time'); assert.equal(idle.tick, CONFIG.roundTicks);
-  assert.equal(idle.play.score, 0); assert.equal(idle.play.bonus, 0); assert.ok(idle.play.gaveUp > 10);
+  assert.ok(idle.play.crashes > 5, 'an idle tram runs into the houses'); assert.equal(idle.play.score, 0); assert.equal(idle.play.bonus, 0);
   const never = engine.advance(engine.createRun(9, CONFIG), CONFIG.maxTicks);
   assert.equal(never.gameOver, true); assert.equal(never.play.end, 'horizon'); assert.equal(never.play.score, 0);
-  const figures = (delivered: number, gaveUp: number, jumped: number) => ({ ...idle.play, delivered, gaveUp, jumped });
-  assert.equal(shiftBonus(figures(4, 0, 0)), 0, 'too few deliveries');
-  assert.equal(shiftBonus(figures(20, 1, 1)), 2500); assert.equal(satisfaction(figures(20, 1, 1)), 90);
-  assert.equal(shiftBonus(figures(15, 3, 2)), 1200); assert.equal(shiftBonus(figures(10, 5, 5)), 500); assert.equal(shiftBonus(figures(5, 10, 0)), 0);
-  const bot = playBot(77);
-  assert.equal(bot.play.end, 'time');
-  assert.equal(bot.play.bonus, shiftBonus(bot.play));
-  assert.ok(bot.play.delivered >= 12 && bot.play.bonus > 0, `delivered ${bot.play.delivered}, bonus ${bot.play.bonus}`);
-  console.log(`  the-lisbon-way bot (seed 77): score ${bot.play.score}, delivered ${bot.play.delivered}, gave up ${bot.play.gaveUp}, jumped ${bot.play.jumped}, satisfaction ${satisfaction(bot.play)}%, bonus ${bot.play.bonus}, best combo ${bot.play.bestCombo}`);
+  assert.equal(shiftBonus({ ...idle.play, crashes: 0, delivered: 5 }), RULES.cleanBonus);
+  assert.equal(shiftBonus({ ...idle.play, crashes: 0, delivered: 4 }), 0); assert.equal(shiftBonus({ ...idle.play, crashes: 1, delivered: 40 }), 0);
+  const bot = play(greedy, 77);
+  assert.equal(bot.play.end, 'time'); assert.equal(bot.play.bonus, shiftBonus(bot.play));
+  assert.ok(bot.play.delivered >= 10, `delivered ${bot.play.delivered}`);
   assert.ok(JSON.stringify(bot).length < 8192);
-  const after = engine.applyInput(bot, { action: 'route', path: [NEIGHBOURS[bot.play.taxi.at]?.[0] as number] }, bot.tick + 1);
-  assert.deepEqual(after, bot, 'a finished run never changes');
+  assert.deepEqual(turn(bot, LEFT, bot.tick + 1), bot, 'a finished run never changes');
 });
 
-test('start: routes before the start or during the countdown are no-ops; a second start does not move the clock', () => {
+test('start: turns before the start or during the countdown are no-ops; a second start does not move the clock', () => {
   const fresh = engine.createRun(3, CONFIG);
-  assert.deepEqual(engine.applyInput(fresh, { action: 'route', path: [CHIADO] }, 2).play, fresh.play);
+  assert.deepEqual(turn(fresh, LEFT, 2).play, fresh.play);
   const s = started(3);
-  assert.deepEqual(route(s, [CHIADO], OPEN - 1).play.taxi.route, []);
+  assert.deepEqual(turn(s, LEFT, OPEN - 1).play.turns, []);
   assert.equal(engine.applyInput(s, { action: 'start' }, 30).startTick, 0);
-  assert.deepEqual(route(s, [CHIADO], OPEN).play.taxi.route, [CHIADO]);
+  assert.deepEqual(turn(s, LEFT, OPEN).play.turns, [LEFT]);
 });
 
-test('forged inputs never score, move the taxi or change a fare', () => {
-  const s = scene([{ from: CHIADO, to: ROSSIO }], [{ from: BAIXA, to: CHIADO, until: OPEN + 5 }]);
+test('forged inputs never score, move the tram or change anyone', () => {
+  const s = scene([c(9, 3), c(9, 4)], [{ stop: 2 }], [{ cell: c(3, 3) }]);
   const forged: unknown[] = [
-    { action: 'route', path: [CHIADO], score: 999 }, { action: 'route', path: [14] }, { action: 'route', path: [-1] }, { action: 'route', path: [8.5] },
-    { action: 'route', path: ['8'] }, { action: 'route', path: 8 }, { action: 'route' }, { action: 'route', path: [CHIADO], extra: 1 },
-    { action: 'teleport', to: CHIADO }, { action: 'drop', id: 51 }, { action: 'start', x: 1 }, { action: 'deliver', fare: 51, gain: 9999 },
-    { action: 'boost', times: 9 }, { action: 'boost', speed: 999 },
-    null, 7, 'route', [], { score: 1e9 }, { action: 'route', path: Array(9).fill(CHIADO) },
+    { action: 'turn', dir: 4 }, { action: 'turn', dir: -1 }, { action: 'turn', dir: 1.5 }, { action: 'turn', dir: '1' }, { action: 'turn' },
+    { action: 'turn', dir: 1, score: 999 }, { action: 'turn', dir: 1, cell: 16 }, { action: 'teleport', cell: c(9, 1) }, { action: 'drop', stop: 2 },
+    { action: 'start', x: 1 }, { action: 'boost' }, null, 7, 'turn', [], { score: 1e9 },
   ];
+  const plain = engine.advance(s, stepTick(1));
   for (const input of forged) {
-    const after = engine.advance(engine.applyInput(s, input, OPEN), OPEN + 5);
-    assert.deepEqual(whats(after), ['jumped'], JSON.stringify(input));
-    assert.equal(after.play.taxi.at, BAIXA); assert.equal(after.play.score, 0);
+    const after = engine.advance(engine.applyInput(s, input, OPEN), stepTick(1));
+    assert.deepEqual(after.play, plain.play, JSON.stringify(input));
     assert.equal(parseInput(input), null);
     assert.equal(inputSchema.safeParse(input).success, false, 'the page refuses what the verifier refuses');
   }
-  assert.ok(inputSchema.safeParse({ action: 'route', path: [CHIADO, ROSSIO] }).success);
-  assert.ok(inputSchema.safeParse({ action: 'route', path: [] }).success);
+  assert.ok(inputSchema.safeParse({ action: 'turn', dir: 2 }).success);
 });
 
 test('checkState and the page schema refuse incoherent or tampered states (and agree)', () => {
-  let s = engine.advance(started(4), 300);
-  s = route(s, shortestPath(s.play.taxi.at, MARQUES));
-  s = engine.advance(s, 330);
-  assert.ok(s.play.waiting.length > 0 && s.play.taxi.to >= 0);
+  let s = scene([c(9, 3), c(9, 4), c(9, 5)], [{ stop: 1 }, { stop: 2 }], [{ cell: c(3, 3) }]);
+  s = { ...s, play: { ...s.play, cones: [{ cell: c(2, 10), until: 999 }] } };
+  s = engine.advance(s, OPEN + 4);                                  // one step: the head at (9, 2), two riders aboard
+  assert.equal(s.play.cars.length, 2);
   assert.deepEqual(checkState(s), s); assert.equal(stateSchema.safeParse(s).success, true);
-  const mutate = (f: (x: any) => void): unknown => { const c = structuredClone(s) as any; f(c); return c; };
+  const mutate = (f: (x: any) => void): unknown => { const x = structuredClone(s) as any; f(x); return x; };
   const bad = [
     mutate((x) => { x.extra = 1; }), mutate((x) => { x.play.extra = 1; }), mutate((x) => { x.play.score = -1; }), mutate((x) => { x.play.score = 1.5; }),
-    mutate((x) => { x.play.taxi.at = 14; }), mutate((x) => { x.play.taxi.to = x.play.taxi.at; }), mutate((x) => { x.play.taxi.pos = 99_999; }),
-    mutate((x) => { x.play.taxi.route = [13, 13]; }), mutate((x) => { x.play.taxi.extra = 1; }),
-    mutate((x) => { x.play.waiting[0].kind = 'limo'; }), mutate((x) => { x.play.waiting[0].to = x.play.waiting[0].from; }),
-    mutate((x) => { x.play.waiting[0].via = 3; x.play.waiting[0].kind = 'ride'; }), mutate((x) => { x.play.waiting[0].extra = 1; }),
-    mutate((x) => { x.play.waiting.push({ ...x.play.waiting[0] }); }), mutate((x) => { x.play.waiting[0].id = x.play.nextId; }),
-    mutate((x) => { x.play.waiting = Array(13).fill(x.play.waiting[0]); }), mutate((x) => { x.play.riders = Array(4).fill(x.play.waiting[0]); }),
-    mutate((x) => { x.play.jams = [{ edge: 0, until: 9 }, { edge: 0, until: 9 }]; }), mutate((x) => { x.play.jams = [{ edge: 23, until: 9 }]; }),
-    mutate((x) => { x.play.end = 'time'; }), mutate((x) => { x.play.combo = x.play.bestCombo + 1; }), mutate((x) => { x.started = false; }),
-    mutate((x) => { x.tick = x.rules.maxTicks + 1; }), mutate((x) => { x.rules.game = 'gate-rush'; }), mutate((x) => { x.seed = -1; }),
-    mutate((x) => { x.play.log = Array(25).fill({ panel: 1, from: 0, to: 1, gain: 1 }); }), mutate((x) => { x.play.bonus = x.play.score + 1; }),
-    mutate((x) => { x.play.boosts = 3; }), mutate((x) => { x.play.boostUntil = x.tick + 999; }), mutate((x) => { x.play.shared = x.play.delivered + 1; }),
+    mutate((x) => { x.play.dir = 4; }), mutate((x) => { x.play.turns = [1, 2, 3]; }), mutate((x) => { x.play.tram = []; }),
+    mutate((x) => { x.play.tram[0] = c(7, 14); }), mutate((x) => { x.play.tram[1] = c(0, 0); }), mutate((x) => { x.play.tram.push(x.play.tram[0]); }),
+    mutate((x) => { x.play.cars.pop(); }), mutate((x) => { x.play.cars[0].stop = 5; }), mutate((x) => { x.play.cars[0].extra = 1; }),
+    mutate((x) => { x.play.people[0].cell = STOPS[0]?.cell; }), mutate((x) => { x.play.people[0].cell = c(1, 1); }),
+    mutate((x) => { x.play.people.push({ ...x.play.people[0] }); }), mutate((x) => { x.play.people[0].id = x.play.nextId; }),
+    mutate((x) => { x.play.cones.push({ cell: x.play.tram[0], until: 9 }); }), mutate((x) => { x.play.end = 'time'; }),
+    mutate((x) => { x.started = false; }), mutate((x) => { x.tick = x.rules.maxTicks + 1; }), mutate((x) => { x.rules.game = 'gate-rush'; }),
+    mutate((x) => { x.seed = -1; }), mutate((x) => { x.play.bonus = x.play.score + 1; }), mutate((x) => { x.play.bestChain = x.play.delivered + 1; }),
+    mutate((x) => { x.play.log = Array(25).fill({ panel: 1, stop: 0, gain: 1 }); }),
   ];
   for (const state of bad) {
-    assert.throws(() => checkState(state), Error);
+    assert.throws(() => checkState(state), Error, JSON.stringify(state).slice(0, 80));
     assert.equal(stateSchema.safeParse(state).success, false);
   }
 });
 
-/** A fair bot: drives the shortest way around traffic to the nearest rider's next stop, or to the nearest waiting
- *  passenger while a seat is free; it plans when its route runs out. */
-function botRoute(s: LwState): number[] | null {
-  const t = s.play.taxi, from = t.to >= 0 ? t.to : t.at;
-  if (t.route.length) return null;
-  const goals = s.play.riders.map((f) => (f.via >= 0 ? f.via : f.to));
-  if (s.play.riders.length < RULES.seats) goals.push(...s.play.waiting.map((f) => f.from));
-  const near = goals.filter((g) => g !== from).sort((a, b) => ((DIST[from] as number[])[a] as number) - ((DIST[from] as number[])[b] as number))[0];
-  if (near === undefined) return null;
-  const jams = new Set(s.play.jams.map((j) => j.edge));
-  return shortestPath(from, near, (e) => (jams.has(e) ? (LENGTH[e] as number) * 3 : 0)).slice(0, RULES.routeMax);
+/* ------------------------------ bots ------------------------------ */
+type Bot = (s: LwState, rnd: () => number) => number | null;
+/** The first direction of the shortest way from the head to any target cell, around houses, roadworks and the tram. */
+function firstDir(s: LwState, targets: Set<number>): number | null {
+  const p = s.play, head = p.tram[0] as number, blocked = new Set([...p.tram.slice(0, -1), ...p.cones.map((x) => x.cell)]);
+  const prev = new Map<number, [number, number]>(), queue: number[] = [];
+  for (let d = 0; d < 4; d++) {
+    const n = stepFrom(head, d);
+    if (d === opposite(p.dir) || n < 0 || BLOCKED[n] || blocked.has(n) || prev.has(n)) continue;
+    prev.set(n, [head, d]); queue.push(n);
+  }
+  while (queue.length) {
+    const cell = queue.shift() as number;
+    if (targets.has(cell)) { let x = cell; while ((prev.get(x) as [number, number])[0] !== head) x = (prev.get(x) as [number, number])[0]; return (prev.get(x) as [number, number])[1]; }
+    for (let d = 0; d < 4; d++) {
+      const n = stepFrom(cell, d);
+      if (n < 0 || BLOCKED[n] || blocked.has(n) || prev.has(n) || n === head) continue;
+      prev.set(n, [cell, d]); queue.push(n);
+    }
+  }
+  return null;
 }
-function playBot(seed: number): LwState {
-  let s = started(seed);
+const anywhere = (s: LwState): number | null => firstDir(s, new Set(Array.from({ length: CELLS }, (_, i) => i).filter((i) => !BLOCKED[i] && i !== s.play.tram[0])));
+const wander: Bot = (_s, rnd) => (rnd() < 0.15 ? Math.floor(rnd() * 4) : null);
+/** Goes for the nearest person or rider's stop. */
+const greedy: Bot = (s) => {
+  const p = s.play, targets = new Set<number>(p.cars.map((x) => (STOPS[x.stop] as { cell: number }).cell));
+  if (p.cars.length < 3) for (const x of p.people) targets.add(x.cell);
+  return firstDir(s, targets) ?? anywhere(s);
+};
+/** Collects one colour, then drops them together. */
+const planner: Bot = (s) => {
+  const p = s.play, targets = new Set<number>(), count = new Array(STOP_COUNT).fill(0) as number[];
+  for (const x of p.cars) count[x.stop] = (count[x.stop] as number) + (x.gold ? 3 : 1);
+  const best = count.indexOf(Math.max(...count));
+  if (p.cars.length >= 6 || (count[best] as number) >= 3) targets.add((STOPS[best] as { cell: number }).cell);
+  else {
+    for (const x of p.people) if (x.stop === best || count[best] === 0 || x.gold) targets.add(x.cell);
+    if (!targets.size) for (const x of p.people) targets.add(x.cell);
+    if (!targets.size && p.cars.length) targets.add((STOPS[best] as { cell: number }).cell);
+  }
+  return firstDir(s, targets) ?? anywhere(s);
+};
+/** A whole shift with a bot that decides one tick before every step of the tram. */
+function play(bot: Bot, seed: number): LwState {
+  let s = started(seed); const rnd = mulberry32(seed);
   for (let t = 1; !s.gameOver && t <= CONFIG.maxTicks; t++) {
     s = engine.advance(s, t);
-    const path = s.gameOver ? null : botRoute(s);
-    if (path) s = engine.applyInput(s, { action: 'route', path }, t);
+    if (s.gameOver || s.play.nextStep - t !== 1 || s.play.turns.length) continue;
+    const d = bot(s, rnd);
+    if (d !== null && d !== s.play.dir) s = turn(s, d, t);
   }
   return s;
 }
 
-test('competitive: skill shows in the score (wandering < greedy < planning) and nobody gets the top bonus for free', () => {
-  const jamCost = (s: LwState) => { const j = new Set(s.play.jams.map((x) => x.edge)); return (e: number) => (j.has(e) ? (LENGTH[e] as number) * 3 : 0); };
-  const anchor = (s: LwState): number => (s.play.taxi.to >= 0 ? s.play.taxi.to : s.play.taxi.at);
-  const eta = (a: number, b: number): number => (TIME[a] as number[])[b] as number;
-  const wander = (s: LwState, rnd: () => number): number[] | null => {
-    if (s.play.taxi.route.length) return null;
-    const n = NEIGHBOURS[anchor(s)] as number[]; return [n[Math.floor(rnd() * n.length)] as number];
-  };
-  // replans every 10 ticks: fare per tick of driving, skips what it cannot reach in time, rushes urgent riders
-  const planner = (s: LwState): number[] | null => {
-    if (s.tick % 10 && s.play.taxi.route.length) return null;
-    const from = anchor(s), worth = (k: Kind): number => (k === 'gold' ? 3 : k === 'express' ? 2 : 1);
-    let best: number | null = null, bestV = -1;
-    for (const f of s.play.riders) {
-      const g = f.via >= 0 ? f.via : f.to, left = f.until - s.tick, need = eta(from, g) + (f.via >= 0 ? eta(f.via, f.to) : 0);
-      const v = (left - need < 30 ? 5000 : 1000) / (1 + eta(from, g)) * worth(f.kind);
-      if (left >= need && v > bestV) { bestV = v; best = g; }
-    }
-    if (s.play.riders.length < RULES.seats) for (const f of s.play.waiting) {
-      if (f.until - s.tick < eta(from, f.from)) continue;
-      const v = 600 * worth(f.kind) / (1 + eta(from, f.from) + eta(f.from, f.to) * 0.5);
-      if (v > bestV) { bestV = v; best = f.from; }
-    }
-    if (best === null || best === from) return null;
-    const path = shortestPath(from, best, jamCost(s)).slice(0, RULES.routeMax);
-    return JSON.stringify(path) === JSON.stringify(s.play.taxi.route) ? null : path;
-  };
-  const run = (bot: (s: LwState, rnd: () => number) => number[] | null, seed: number) => {
-    let s = started(seed); const rnd = mulberry32(seed);
-    for (let t = 1; !s.gameOver && t <= CONFIG.maxTicks; t++) { s = engine.advance(s, t); const p = s.gameOver ? null : bot(s, rnd); if (p) s = engine.applyInput(s, { action: 'route', path: p }, t); }
-    return s.play;
-  };
+test('competitive: skill shows in the score (wandering < greedy < planning)', () => {
   const median = (xs: number[]): number => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] as number;
-  const seeds = [1, 7920, 15839, 23758, 31677, 39596, 47515, 55434, 63353];
-  const results = { wander: seeds.map((s) => run(wander, s)), greedy: seeds.map((s) => run((x) => botRoute(x), s)), planner: seeds.map((s) => run(planner, s)) };
-  const m = Object.fromEntries(Object.entries(results).map(([k, v]) => [k, median(v.map((p) => p.score))])) as Record<keyof typeof results, number>;
-  console.log(`  the-lisbon-way skill: median score wander ${m.wander}, greedy ${m.greedy}, planner ${m.planner}; planner satisfaction ${median(results.planner.map(satisfaction))}%`);
-  assert.ok(m.wander < 1000 && m.greedy > m.wander + 1000 && m.planner > m.greedy * 1.3, JSON.stringify(m));
-  assert.ok(results.planner.filter((p) => p.bonus === 2500).length <= seeds.length / 3, 'the top bonus stays hard to earn');
+  const seeds = [3, 7922, 15841, 23760, 31679, 39598, 47517, 55436, 63355];
+  const m = { wander: median(seeds.map((x) => play(wander, x).play.score)), greedy: median(seeds.map((x) => play(greedy, x).play.score)), planner: median(seeds.map((x) => play(planner, x).play.score)) };
+  console.log(`  the-lisbon-way skill: median score wander ${m.wander}, greedy ${m.greedy}, planner ${m.planner}`);
+  assert.ok(m.wander < 500 && m.greedy > m.wander + 2000 && m.planner > m.greedy, JSON.stringify(m));
 });
 
 /* ------------------------------ the BUILT verifier ------------------------------ */
@@ -412,7 +301,7 @@ async function built() {
   return { files, verifier, config: JSON.parse(strFromU8(files['scoring-config.json'] as Uint8Array)) as Record<string, unknown> };
 }
 
-test('the-lisbon-way: the archive has Studio\'s root layout, the credit line, a zod-free verifier under 256 KB', async () => {
+test('the-lisbon-way: the archive has Studio\'s root layout, the credit line, a zod-free verifier under 256 KB, a web app', async () => {
   const { files, config } = await built();
   for (const required of ['index.html', 'config.json', 'server-verifier.js', 'scoring-config.json']) assert.ok(files[required], `missing ${required}`);
   assert.ok(Object.keys(files).some((name) => /^assets\/app-[0-9a-f]{16}\.js$/.test(name)), 'content-hashed app bundle');
@@ -427,15 +316,13 @@ test('the-lisbon-way: the archive has Studio\'s root layout, the credit line, a 
   const publicConfig = strFromU8(files['config.json'] as Uint8Array);
   assert.ok(!/secret|token|private|treasury|0x[0-9a-fA-F]{40}/i.test(publicConfig));
   assert.equal(JSON.parse(publicConfig).groupId, '60faaf46-ba4b-460c-a82a-adb852371a94');
-  // a web app on every device: manifest, home-screen icons, full screen
   const manifest = JSON.parse(strFromU8(files['assets/manifest.json'] as Uint8Array)) as { short_name: string; display: string; icons: { src: string }[] };
-  assert.equal(manifest.short_name, 'THE LISBON WAY'); assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.short_name, 'THE LISBON WAY'); assert.equal(manifest.display, 'standalone'); assert.equal(manifest.icons.length, 2);
   for (const icon of manifest.icons) assert.ok(files[`assets/${icon.src.slice(2)}`], icon.src);
-  assert.equal(manifest.icons.length, 2);
-  assert.ok(html.includes('rel="manifest" href="./assets/manifest.json"') && html.includes('apple-touch-icon') && html.includes('viewport-fit=cover'));
+  assert.ok(html.includes('rel="manifest" href="./assets/manifest.json"') && html.includes('apple-touch-icon'));
   const app = Object.entries(files).find(([name]) => /^assets\/app-[0-9a-f]{16}\.js$/.test(name))?.[1] as Uint8Array;
-  console.log(`  the-lisbon-way page bundle: ${(app.byteLength / 1024).toFixed(0)} KB (three.js included), verifier ${(verifier.byteLength / 1024).toFixed(0)} KB`);
-  assert.ok(!strFromU8(app).includes('__ltPlaceOnScreen'), 'the dev-only hook is not in a published build');
+  console.log(`  the-lisbon-way page bundle: ${(app.byteLength / 1024).toFixed(0)} KB, verifier ${(verifier.byteLength / 1024).toFixed(0)} KB`);
+  assert.ok(!strFromU8(app).includes('__lwTurn'), 'the dev-only hook is not in a published build');
 });
 
 test('the-lisbon-way: the BUILT verifier answers the conformance probe and rejects everything else', async () => {
@@ -451,13 +338,10 @@ test('the-lisbon-way: the BUILT verifier answers the conformance probe and rejec
   assert.equal((await post({ version: 1, op: 'advance', state, serverTick: -1 })).status, 400);
   assert.equal((await post({ version: 1, op: 'advance', state, serverTick: 3, extra: true })).status, 400);
   assert.equal((await post({ version: 1, op: 'createRun', seed: 1, config: { ...config, game: 'gate-rush' } })).status, 400);
-  assert.equal((await post({ version: 1, op: 'score', state: { ...state, play: { ...state.play, score: 999_999, bonus: 0 }, tick: -1 } })).status, 400);
   assert.equal((await verifier.fetch(new Request('https://verifier.invalid/v1', { method: 'GET' }))).status, 404);
-  // time never moves backwards, a forged route does nothing
-  const later = await post({ version: 1, op: 'applyInput', state, input: { action: 'start' }, serverTick: 10 });
-  const s10 = (await later.json() as { result: LwState }).result;
-  assert.equal((await post({ version: 1, op: 'advance', state: s10, serverTick: 9 })).status, 400);
-  const forged = await post({ version: 1, op: 'applyInput', state: s10, input: { action: 'route', path: [13], score: 1e6 }, serverTick: 11 });
+  const s10 = (await (await post({ version: 1, op: 'applyInput', state, input: { action: 'start' }, serverTick: 10 })).json() as { result: LwState }).result;
+  assert.equal((await post({ version: 1, op: 'advance', state: s10, serverTick: 9 })).status, 400, 'time never moves backwards');
+  const forged = await post({ version: 1, op: 'applyInput', state: s10, input: { action: 'turn', dir: 1, score: 1e6 }, serverTick: 80 });
   assert.equal((await forged.json() as { result: LwState }).result.play.score, 0);
 });
 
@@ -475,10 +359,11 @@ test('the-lisbon-way: whole shifts through the BUILT verifier, called every tick
     const rnd = mulberry32(seed ^ 0x99);
     while (!run.state.gameOver && run.tick < (config.maxTicks as number)) {
       await run.advanceTo(run.tick + 1); local = engine.advance(local, run.tick);
-      const path = run.state.gameOver ? null : botRoute(run.state);
-      // a fallible player: plans 1-3 ticks late, now and then sends a route that cannot be driven (a no-op)
-      if (path && rnd() < 0.9) await send({ action: 'route', path }, run.tick + 1 + Math.floor(rnd() * 3));
-      else if (rnd() < 0.01) await send({ action: 'route', path: [Math.floor(rnd() * N)] }, run.tick + 1);
+      const s = run.state;
+      if (s.gameOver || s.play.nextStep - run.tick > 2 || s.play.turns.length) continue;
+      // a fallible player: decides a little late now and then, and sometimes turns at random
+      const d = rnd() < 0.9 ? greedy(s, rnd) : Math.floor(rnd() * 4);
+      if (d !== null && d !== s.play.dir) await send({ action: 'turn', dir: d }, run.tick + 1);
     }
     await run.advanceTo(config.maxTicks as number); local = engine.advance(local, run.tick);
     assert.equal(run.state.gameOver, true);
@@ -489,7 +374,7 @@ test('the-lisbon-way: whole shifts through the BUILT verifier, called every tick
     for (const { input, tick } of sent) await again.input(input, tick);
     await again.advanceTo(run.tick);
     assert.deepEqual(again.state, run.state, 'same seed, same inputs at the same ticks: same shift');
-    console.log(`  the-lisbon-way built verifier (seed ${seed}): ${run.calls} calls, score ${run.state.play.score}, delivered ${run.state.play.delivered}, satisfaction ${satisfaction(run.state.play)}%, largest state ${run.largestState} B`);
+    console.log(`  the-lisbon-way built verifier (seed ${seed}): ${run.calls} calls, score ${run.state.play.score}, dropped ${run.state.play.delivered}, crashes ${run.state.play.crashes}, largest state ${run.largestState} B`);
     assert.ok(run.largestState < 8192);
   }
   times.sort((a, b) => a - b);

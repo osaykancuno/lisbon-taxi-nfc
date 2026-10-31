@@ -2,7 +2,7 @@
   "name": "lisbon-taxi-nfc",
   "version": "0.1.0",
   "private": true,
-  "description": "THE LISBON WAY, a game of THE WALL ARCADE on SuperRare Connect: drive the people of the wall around a 3D Lisbon. Server-verified.",
+  "description": "THE LISBON WAY, a game of THE WALL ARCADE on SuperRare Connect: drive Lisbon's tram, pick up the people of the wall, drop them at the stop of their colour. Server-verified.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -15,12 +15,10 @@
   },
   "dependencies": {
     "@rareprotocol/connect": "0.11.0",
-    "three": "0.169.0",
     "zod": "4.3.6"
   },
   "devDependencies": {
     "@types/node": "22.15.21",
-    "@types/three": "0.169.0",
     "esbuild": "0.25.5",
     "fflate": "0.8.2",
     "tsx": "4.19.4",
