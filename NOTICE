@@ -1,0 +1,17 @@
+THE LISBON WAY, a game of THE WALL ARCADE on SuperRare Connect
+Copyright (c) 2026 osaykancuno (K4NCUN0 on the wall) and NFC Summit
+SPDX-License-Identifier: MIT
+
+THE LISBON WAY (src/games/the-lisbon-way/, src/verifiers/the-lisbon-way.ts, tests/the-lisbon-way*.test.ts,
+scripts/the-lisbon-way-config.ts, src/assets/icons/, PUBBLICA.cmd, PUBBLICA.ps1): game rules, art direction, 3D scene
+and simulation by osaykancuno, built on THE WALL ARCADE's shared code
+(https://github.com/hs7j4yk4sz-boop/wall-arcade-connect, MIT, Copyright (c) 2026 NFC Summit).
+
+The Connect plumbing under src/shell/ (paid-credit purchase and recovery UI, paid-round / server-run state machine,
+wallet-isolated storage, hosted-flow error mapping) and the verifier request protocol under src/verifiers/ are adapted
+from https://github.com/superrare/studio-games-example (MIT, Copyright (c) 2026 SuperRare), itself adapted from
+examples/target-game in @rareprotocol/connect (https://github.com/superrare/superrare-connect, MIT, Copyright (c) 2026
+SuperRare). Upstream license retained in LICENSE.
+
+Runtime dependencies @rareprotocol/connect and three (three.js, Copyright 2010-2024 three.js authors) are distributed
+under MIT. Other dependencies retain their own package license notices in node_modules.

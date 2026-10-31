@@ -1,0 +1,14 @@
+_ref/
+node_modules/
+.env
+.env.*
+*.log
+dist/
+*.tgz
+.DS_Store
+tools/
+deploy/private/
+
+# Local Netlify folder
+.netlify
+deploy/the-lisbon-way.app.json
