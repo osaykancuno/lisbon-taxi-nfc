@@ -70,6 +70,13 @@ if (-not (Test-Path $Config) -and (Test-Path $Answer)) {
   Run 'npx' @('--no-install', 'tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
 }
 if (-not (Test-Path $Config)) {
+  # senza la config si creerebbe un'app NUOVA: mai per sbaglio, solo se lo chiedi esplicitamente
+  Write-Host ''
+  Write-Host "Non trovo deploy\the-lisbon-way.config.json: senza questo file lo script creerebbe un'app NUOVA su SuperRare." -ForegroundColor Yellow
+  Write-Host "Se il gioco e' gia' online, NON serve: metti in questa cartella il file deploy\the-lisbon-way.config.json"
+  Write-Host "della pubblicazione precedente (o scarica il progetto aggiornato da GitHub, che lo contiene) e rilancia PUBBLICA.cmd."
+  $choice = Read-Host "Per creare davvero un'app nuova scrivi NUOVA (qualsiasi altra risposta annulla)"
+  if ($choice -cne 'NUOVA') { Fail "Annullato: nessuna app creata, niente pubblicato." }
   Step 'Prima pubblicazione: login e negozio'
   $stores = Invoke-Rare @('store', 'list')
   if ($null -eq $stores -or -not $stores.ok) {
