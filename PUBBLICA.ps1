@@ -47,20 +47,27 @@ Step 'Controllo la riga di comando di SuperRare'
 if (-not (Get-Command rare-profile -ErrorAction SilentlyContinue)) { Run 'npm' @('install', '--global', '@rareprotocol/rare-profile@0.1.0') 'L''installazione di rare-profile' }
 
 Step 'Installo le dipendenze del gioco'
-if (-not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) { Run 'npm' @('ci') 'npm ci' } else { Write-Host 'gia'' installate.' }
+# ogni pacchetto che serve, uno per uno: una cartella node_modules incompleta (o un npm che salta gli strumenti di
+# sviluppo, per esempio con NODE_ENV=production) si reinstalla da capo, strumenti di sviluppo compresi
+$needed = @('tsx', 'esbuild', 'fflate', 'typescript', 'three', 'zod', '@rareprotocol\connect')
+$missing = @($needed | Where-Object { -not (Test-Path (Join-Path $PSScriptRoot "node_modules\$_\package.json")) })
+if ($missing.Count -gt 0) {
+  Write-Host "Mancano: $($missing -join ', '). Installo tutto da capo."
+  Run 'npm' @('ci', '--include=dev') 'npm ci'
+} else { Write-Host 'gia'' installate.' }
 
 Step 'Aggiorno i nomi del muro'
 & node --import tsx scripts/snapshot-wall.ts
 if ($LASTEXITCODE -ne 0) { Write-Host 'Il muro non risponde adesso: uso i nomi gia'' inclusi.' -ForegroundColor Yellow }
 
 Step 'Provo il gioco (test delle regole e del verificatore, circa un minuto)'
-Run 'npx' @('tsx', '--test', 'tests/the-lisbon-way.test.ts', 'tests/the-lisbon-way-controls.test.ts') 'I test'
+Run 'npx' @('--no-install', 'tsx', '--test', 'tests/the-lisbon-way.test.ts', 'tests/the-lisbon-way-controls.test.ts') 'I test'
 
 # la risposta della creazione dell'app, salvata appena arriva: se qualcosa si ferma dopo, non si crea una seconda app
 $Answer = Join-Path $PSScriptRoot 'deploy\the-lisbon-way.app.json'
 if (-not (Test-Path $Config) -and (Test-Path $Answer)) {
   Step 'Riprendo la prima pubblicazione: l''app esiste gia'''
-  Run 'npx' @('tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
+  Run 'npx' @('--no-install', 'tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
 }
 if (-not (Test-Path $Config)) {
   Step 'Prima pubblicazione: login e negozio'
@@ -94,12 +101,12 @@ if (-not (Test-Path $Config)) {
   $deployed = Invoke-Rare @('app', 'deploy', '--store', "$($store.id)", '--title', 'THE LISBON WAY - integration test', '--price', '0', '--zip', $bootstrap)
   if ($null -eq $deployed -or -not $deployed.ok) { Fail "La creazione dell'app non e' riuscita. Risposta: $script:CliRaw" }
   [System.IO.File]::WriteAllText($Answer, $script:CliRaw)
-  Run 'npx' @('tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
+  Run 'npx' @('--no-install', 'tsx', 'scripts/the-lisbon-way-config.ts', $Answer) 'La scrittura della configurazione'
 }
 
 $cfg = Get-Content -Raw -LiteralPath $Config | ConvertFrom-Json
 Step "Costruisco il gioco per $($cfg.appOrigin)"
-Run 'npx' @('tsx', 'scripts/build.ts', '--config', 'deploy/the-lisbon-way.config.json', '--output', 'dist/the-lisbon-way.zip', '--force') 'La build'
+Run 'npx' @('--no-install', 'tsx', 'scripts/build.ts', '--config', 'deploy/the-lisbon-way.config.json', '--output', 'dist/the-lisbon-way.zip', '--force') 'La build'
 
 Step 'Pubblico il gioco su SuperRare Studio (verificatore e evento di punteggio compresi)'
 $updated = Invoke-Rare @('app', 'update', "$($cfg.appId)", '--zip', $Zip, '--max-attempts', '10000')
